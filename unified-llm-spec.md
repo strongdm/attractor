@@ -119,7 +119,7 @@ When a request specifies a `provider` field, the Client routes to that adapter. 
 
 #### Model String Convention
 
-Model identifiers are the provider's native string (e.g., `"gpt-4.1"`, `"claude-sonnet-4-5-20250929"`, `"gemini-2.0-flash"`). The library does not invent its own model namespace. This avoids the maintenance burden of mapping tables and ensures new models work immediately without library updates. If a model string could be ambiguous (multiple providers support it), the `provider` field on the request disambiguates.
+Model identifiers are the provider's native string (e.g., `"gpt-5.2"`, `"claude-opus-4-6"`, `"gemini-3-flash-preview"`). The library does not invent its own model namespace. This avoids the maintenance burden of mapping tables and ensures new models work immediately without library updates. If a model string could be ambiguous (multiple providers support it), the `provider` field on the request disambiguates.
 
 ### 2.3 Middleware / Interceptor Pattern
 
@@ -215,7 +215,7 @@ Each provider adapter MUST use the provider's native, preferred API -- not a com
 
 | Provider  | Required API                    | Why Not Compatibility Layer                                                |
 |-----------|---------------------------------|---------------------------------------------------------------------------|
-| OpenAI    | **Responses API** (`/v1/responses`) | The Responses API properly surfaces reasoning tokens, supports built-in tools (web search, file search, code interpreter), and is OpenAI's forward-looking API. The Chat Completions API does not return reasoning tokens for reasoning models (o1, o3, etc.) and lacks server-side conversation state. |
+| OpenAI    | **Responses API** (`/v1/responses`) | The Responses API properly surfaces reasoning tokens, supports built-in tools (web search, file search, code interpreter), and is OpenAI's forward-looking API. The Chat Completions API does not return reasoning tokens for reasoning models (GPT-5.2 series, etc.) and lacks server-side conversation state. |
 | Anthropic | **Messages API** (`/v1/messages`)   | The Messages API supports extended thinking with thinking blocks and signatures, prompt caching with `cache_control`, beta feature headers, and the strict user/assistant alternation model. There is no alternative. |
 | Gemini    | **Gemini API** (`/v1beta/models/*/generateContent`) | The native Gemini API supports grounding with Google Search, code execution, system instructions, and cached content. OpenAI-compatible endpoints for Gemini are limited shims. |
 
@@ -235,11 +235,11 @@ These must be passed as HTTP headers on the request. The adapter should accept t
 
 ```
 request = Request(
-    model = "claude-sonnet-4-5-20250929",
+    model = "claude-opus-4-6",
     messages = [ ... ],
     provider_options = {
         "anthropic": {
-            "beta_headers": ["max-tokens-3-5-sonnet-2025-04-14", "interleaved-thinking-2025-05-14"]
+            "beta_headers": ["interleaved-thinking-2025-05-14"]
         }
     }
 )
@@ -259,9 +259,9 @@ The SDK should ship with a catalog of known models to help consumers (especially
 
 ```
 RECORD ModelInfo:
-    id              : String            -- the model's API identifier (e.g., "claude-sonnet-4-5-20250929")
+    id              : String            -- the model's API identifier (e.g., "claude-opus-4-6")
     provider        : String            -- which provider serves this model
-    display_name    : String            -- human-readable name (e.g., "Claude Sonnet 4.5")
+    display_name    : String            -- human-readable name (e.g., "Claude Opus 4.6")
     context_window  : Integer           -- maximum total tokens (input + output)
     max_output      : Integer | None    -- maximum output tokens
     supports_tools  : Boolean           -- whether the model supports tool calling
@@ -276,9 +276,9 @@ RECORD ModelInfo:
 
 | Provider  | Top Model(s)                                        |
 |-----------|-----------------------------------------------------|
-| Anthropic | **Claude Opus 4.6**, Claude Opus 4.5, Claude Sonnet 4.5 |
-| OpenAI    | **GPT-5.2 series**, o4-mini, o3                     |
-| Gemini    | **Gemini 3 Flash (Preview)**, Gemini 2.5 Pro        |
+| Anthropic | **Claude Opus 4.6**, Claude Sonnet 4.5               |
+| OpenAI    | **GPT-5.2 series** (GPT-5.2, GPT-5.2-codex)        |
+| Gemini    | **Gemini 3 Pro (Preview)**, Gemini 3 Flash (Preview) |
 
 Implementations should default to the latest available models when no model is specified by the caller, and should prefer newer models in any model selection logic. However, the catalog must also include older models that are still served by the APIs, as callers may need them for cost, latency, or compatibility reasons.
 
@@ -287,49 +287,26 @@ Example catalog (keep this updated as new models release):
 ```
 MODELS = [
     -- ==========================================================
-    -- Anthropic -- prefer Claude Opus 4.6 / 4.5 for top quality
+    -- Anthropic -- prefer Claude Opus 4.6 for top quality
     -- ==========================================================
 
-    -- Latest
     ModelInfo(id="claude-opus-4-6",               provider="anthropic", display_name="Claude Opus 4.6",   context_window=200000, supports_tools=true, supports_vision=true, supports_reasoning=true),
-    ModelInfo(id="claude-opus-4-5-20250514",      provider="anthropic", display_name="Claude Opus 4.5",   context_window=200000, supports_tools=true, supports_vision=true, supports_reasoning=true),
-    ModelInfo(id="claude-sonnet-4-5-20250929",    provider="anthropic", display_name="Claude Sonnet 4.5", context_window=200000, supports_tools=true, supports_vision=true, supports_reasoning=true),
-    ModelInfo(id="claude-haiku-4-5-20251001",     provider="anthropic", display_name="Claude Haiku 4.5",  context_window=200000, supports_tools=true, supports_vision=true, supports_reasoning=false),
-    -- Older (still supported)
-    ModelInfo(id="claude-3-7-sonnet-20250219",    provider="anthropic", display_name="Claude 3.7 Sonnet", context_window=200000, supports_tools=true, supports_vision=true, supports_reasoning=true),
-    ModelInfo(id="claude-3-5-sonnet-20241022",    provider="anthropic", display_name="Claude 3.5 Sonnet", context_window=200000, supports_tools=true, supports_vision=true, supports_reasoning=false),
-    ModelInfo(id="claude-3-5-haiku-20241022",     provider="anthropic", display_name="Claude 3.5 Haiku",  context_window=200000, supports_tools=true, supports_vision=true, supports_reasoning=false),
+    ModelInfo(id="claude-sonnet-4-5",             provider="anthropic", display_name="Claude Sonnet 4.5", context_window=200000, supports_tools=true, supports_vision=true, supports_reasoning=true),
 
     -- ==========================================================
     -- OpenAI -- prefer GPT-5.2 series for top quality
     -- ==========================================================
 
-    -- Latest
-    ModelInfo(id="gpt-5.2",                       provider="openai",    display_name="GPT-5.2",           context_window=1047576, supports_tools=true, supports_vision=true, supports_reasoning=false),
-    ModelInfo(id="gpt-5.2-mini",                  provider="openai",    display_name="GPT-5.2 Mini",      context_window=1047576, supports_tools=true, supports_vision=true, supports_reasoning=false),
-    -- Reasoning models
-    ModelInfo(id="o4-mini",                       provider="openai",    display_name="o4-mini",           context_window=200000, supports_tools=true, supports_vision=true, supports_reasoning=true),
-    ModelInfo(id="o3",                            provider="openai",    display_name="o3",                context_window=200000, supports_tools=true, supports_vision=true, supports_reasoning=true),
-    ModelInfo(id="o3-mini",                       provider="openai",    display_name="o3 Mini",           context_window=200000, supports_tools=true, supports_vision=true, supports_reasoning=true),
-    -- GPT-4.1 series
-    ModelInfo(id="gpt-4.1",                       provider="openai",    display_name="GPT-4.1",           context_window=1047576, supports_tools=true, supports_vision=true, supports_reasoning=false),
-    ModelInfo(id="gpt-4.1-mini",                  provider="openai",    display_name="GPT-4.1 Mini",      context_window=1047576, supports_tools=true, supports_vision=true, supports_reasoning=false),
-    ModelInfo(id="gpt-4.1-nano",                  provider="openai",    display_name="GPT-4.1 Nano",      context_window=1047576, supports_tools=true, supports_vision=true, supports_reasoning=false),
-    -- Older (still supported)
-    ModelInfo(id="gpt-4o",                        provider="openai",    display_name="GPT-4o",            context_window=128000,  supports_tools=true, supports_vision=true, supports_reasoning=false),
-    ModelInfo(id="gpt-4o-mini",                   provider="openai",    display_name="GPT-4o Mini",       context_window=128000,  supports_tools=true, supports_vision=true, supports_reasoning=false),
-    ModelInfo(id="o1",                            provider="openai",    display_name="o1",                context_window=200000, supports_tools=true, supports_vision=true, supports_reasoning=true),
+    ModelInfo(id="gpt-5.2",                       provider="openai",    display_name="GPT-5.2",           context_window=1047576, supports_tools=true, supports_vision=true, supports_reasoning=true),
+    ModelInfo(id="gpt-5.2-mini",                  provider="openai",    display_name="GPT-5.2 Mini",      context_window=1047576, supports_tools=true, supports_vision=true, supports_reasoning=true),
+    ModelInfo(id="gpt-5.2-codex",                 provider="openai",    display_name="GPT-5.2 Codex",     context_window=1047576, supports_tools=true, supports_vision=true, supports_reasoning=true),
 
     -- ==========================================================
     -- Gemini -- prefer Gemini 3 Flash Preview for latest
     -- ==========================================================
 
-    -- Latest
+    ModelInfo(id="gemini-3-pro-preview",          provider="gemini",    display_name="Gemini 3 Pro (Preview)",   context_window=1048576, supports_tools=true, supports_vision=true, supports_reasoning=true),
     ModelInfo(id="gemini-3-flash-preview",        provider="gemini",    display_name="Gemini 3 Flash (Preview)", context_window=1048576, supports_tools=true, supports_vision=true, supports_reasoning=true),
-    -- Stable
-    ModelInfo(id="gemini-2.5-pro",                provider="gemini",    display_name="Gemini 2.5 Pro",    context_window=1048576, supports_tools=true, supports_vision=true, supports_reasoning=true),
-    ModelInfo(id="gemini-2.5-flash",              provider="gemini",    display_name="Gemini 2.5 Flash",  context_window=1048576, supports_tools=true, supports_vision=true, supports_reasoning=true),
-    ModelInfo(id="gemini-2.0-flash",              provider="gemini",    display_name="Gemini 2.0 Flash",  context_window=1048576, supports_tools=true, supports_vision=true, supports_reasoning=false),
 ]
 ```
 
@@ -596,7 +573,7 @@ The `provider_options` field passes through provider-specific parameters that th
 
 ```
 request = Request(
-    model = "claude-sonnet-4-5-20250929",
+    model = "claude-opus-4-6",
     messages = [ ... ],
     provider_options = {
         "anthropic": {
@@ -709,10 +686,10 @@ Provider usage field mapping:
 
 Reasoning tokens are tokens the model uses for internal chain-of-thought before producing visible output. Properly tracking and surfacing reasoning tokens is essential for cost management and debugging, because reasoning tokens are billed as output tokens but are not visible in the response text.
 
-**OpenAI reasoning models (o1, o3, o4-mini, etc.):**
+**OpenAI reasoning models (GPT-5.2 series, etc.):**
 - The **Responses API** (`/v1/responses`) is REQUIRED for reasoning models. The Chat Completions API does not return reasoning token breakdowns for these models. The Responses API returns `usage.output_tokens_details.reasoning_tokens` which tells you exactly how many tokens were spent on reasoning vs. visible output.
 - The `reasoning_effort` request parameter ("low", "medium", "high") controls how much reasoning the model does. This maps to `reasoning.effort` in the Responses API request body.
-- Reasoning content is not visible in the response (OpenAI does not expose the thinking text for o-series models). The adapter should still populate `reasoning_tokens` in Usage so callers can track costs.
+- Reasoning content is not visible in the response (OpenAI does not expose the thinking text for GPT-5.2 series models). The adapter should still populate `reasoning_tokens` in Usage so callers can track costs.
 
 **Anthropic extended thinking (Claude with thinking enabled):**
 - Extended thinking is enabled via the `thinking` parameter (through `provider_options`) and requires specific beta headers.
@@ -720,12 +697,12 @@ Reasoning tokens are tokens the model uses for internal chain-of-thought before 
 - The adapter should populate `reasoning_tokens` by summing the token lengths of thinking blocks (Anthropic does not provide a separate reasoning token count, but the thinking block text can be used for estimation).
 - Thinking blocks carry a `signature` field that must be round-tripped verbatim in subsequent messages.
 
-**Gemini thinking (Gemini 2.5 models):**
-- Gemini 2.5 Pro and Flash support "thinking" via the `thinkingConfig` parameter.
+**Gemini thinking (Gemini 3 models):**
+- Gemini 3 Flash supports "thinking" via the `thinkingConfig` parameter.
 - Gemini reports `thoughtsTokenCount` in `usageMetadata`, which maps directly to `reasoning_tokens`.
 - Thinking content may be returned in the response as a `thought` part.
 
-**Why this matters:** When switching between providers, reasoning token usage can vary dramatically. A query that uses 500 reasoning tokens on OpenAI o3 might use 2000 thinking tokens on Claude. The unified SDK must track this accurately so callers can make informed cost decisions. Even though reasoning tokens make direct provider switching unfavorable (the thinking styles are different), the SDK should still translate correctly so higher-level tools can compare.
+**Why this matters:** When switching between providers, reasoning token usage can vary dramatically. A query that uses 500 reasoning tokens on OpenAI GPT-5.2 might use 2000 thinking tokens on Claude. The unified SDK must track this accurately so callers can make informed cost decisions. Even though reasoning tokens make direct provider switching unfavorable (the thinking styles are different), the SDK should still translate correctly so higher-level tools can compare.
 
 ### 3.10 ResponseFormat
 
@@ -824,7 +801,7 @@ The fundamental blocking call. Sends a request, blocks until the model finishes,
 
 ```
 response = client.complete(Request(
-    model = "claude-sonnet-4-5-20250929",
+    model = "claude-opus-4-6",
     messages = [Message.user("Explain photosynthesis in one paragraph")],
     max_tokens = 500,
     temperature = 0.7
@@ -848,7 +825,7 @@ The fundamental streaming call. Returns an asynchronous iterator of StreamEvent 
 
 ```
 event_stream = client.stream(Request(
-    model = "claude-sonnet-4-5-20250929",
+    model = "claude-opus-4-6",
     messages = [Message.user("Write a short story")]
 ))
 
@@ -937,7 +914,7 @@ The primary streaming generation function. Equivalent to `generate()` but yields
 
 ```
 result = stream(
-    model = "claude-sonnet-4-5-20250929",
+    model = "claude-opus-4-6",
     prompt = "Write a haiku about coding"
 )
 
@@ -987,7 +964,7 @@ Structured output generation with schema validation:
 
 ```
 result = generate_object(
-    model = "gpt-4.1",
+    model = "gpt-5.2",
     prompt = "Extract the person's name and age from: 'Alice is 30 years old'",
     schema = {
         "type": "object",
@@ -1019,7 +996,7 @@ Streaming structured output with partial object updates:
 
 ```
 result = stream_object(
-    model = "gpt-4.1",
+    model = "gpt-5.2",
     prompt = "Generate a list of 5 recipes",
     schema = recipes_schema
 )
@@ -1878,7 +1855,7 @@ When continuing a conversation that includes thinking blocks, the thinking conte
 ### B.1 Simple Generation
 
 ```
-result = generate(model = "claude-sonnet-4-5-20250929", prompt = "Explain quantum computing")
+result = generate(model = "claude-opus-4-6", prompt = "Explain quantum computing")
 PRINT(result.text)
 PRINT(result.usage.total_tokens)
 ```
@@ -1887,7 +1864,7 @@ PRINT(result.usage.total_tokens)
 
 ```
 result = generate(
-    model = "claude-sonnet-4-5-20250929",
+    model = "claude-opus-4-6",
     system = "You are a helpful assistant with access to weather data.",
     prompt = "What is the weather in San Francisco?",
     tools = [weather_tool],
@@ -1902,7 +1879,7 @@ PRINT(result.total_usage.total_tokens)          -- aggregated token count
 ### B.3 Streaming
 
 ```
-result = stream(model = "claude-sonnet-4-5-20250929", prompt = "Write a poem")
+result = stream(model = "claude-opus-4-6", prompt = "Write a poem")
 
 FOR EACH event IN result:
     IF event.type == TEXT_DELTA:
@@ -1916,7 +1893,7 @@ PRINT(response.usage)
 
 ```
 result = generate_object(
-    model = "gpt-4.1",
+    model = "gpt-5.2",
     prompt = "Extract the person's name and age from: 'Alice is 30 years old'",
     schema = {
         "type": "object",
@@ -1935,9 +1912,9 @@ PRINT(result.output)    -- { "name": "Alice", "age": 30 }
 
 ```
 TRY:
-    result = generate(model = "claude-sonnet-4-5-20250929", prompt = "...")
+    result = generate(model = "claude-opus-4-6", prompt = "...")
 CATCH ProviderError:
-    result = generate(model = "gpt-4.1", provider = "openai", prompt = "...")
+    result = generate(model = "gpt-5.2", provider = "openai", prompt = "...")
 ```
 
 ### B.6 Middleware for Logging
@@ -2044,7 +2021,7 @@ For EACH provider (OpenAI, Anthropic, Gemini), verify:
 
 ### 8.5 Reasoning Tokens
 
-- [ ] OpenAI reasoning models (o3, o4-mini, etc.) return `reasoning_tokens` in `Usage` via the Responses API
+- [ ] OpenAI reasoning models (GPT-5.2 series, etc.) return `reasoning_tokens` in `Usage` via the Responses API
 - [ ] `reasoning_effort` parameter is passed through correctly to OpenAI reasoning models
 - [ ] Anthropic extended thinking blocks are returned as `THINKING` content parts when enabled
 - [ ] Thinking block `signature` field is preserved for round-tripping
@@ -2130,7 +2107,7 @@ FOR EACH provider IN ["anthropic", "openai", "gemini"]:
     ASSERT result.finish_reason.reason == "stop"
 
 -- 2. Streaming
-stream_result = stream(model = "claude-sonnet-4-5-20250929", prompt = "Write a haiku.")
+stream_result = stream(model = "claude-opus-4-6", prompt = "Write a haiku.")
 text_chunks = []
 FOR EACH event IN stream_result:
     IF event.type == TEXT_DELTA:
@@ -2139,7 +2116,7 @@ ASSERT JOIN(text_chunks) == stream_result.response().text
 
 -- 3. Tool calling with parallel execution
 result = generate(
-    model = "claude-sonnet-4-5-20250929",
+    model = "claude-opus-4-6",
     prompt = "What is the weather in San Francisco and New York?",
     tools = [weather_tool],    -- tool that returns mock weather data
     max_tool_rounds = 3
@@ -2150,7 +2127,7 @@ ASSERT result.text contains "New York"
 
 -- 4. Image input
 result = generate(
-    model = "claude-sonnet-4-5-20250929",
+    model = "claude-opus-4-6",
     messages = [Message(role=USER, content=[
         ContentPart(kind=TEXT, text="What do you see?"),
         ContentPart(kind=IMAGE, image=ImageData(data=<png_bytes>, media_type="image/png"))
@@ -2160,7 +2137,7 @@ ASSERT result.text is not empty
 
 -- 5. Structured output
 result = generate_object(
-    model = "gpt-4.1",
+    model = "gpt-5.2",
     prompt = "Extract: Alice is 30 years old",
     schema = {"type":"object", "properties":{"name":{"type":"string"},"age":{"type":"integer"}}, "required":["name","age"]}
 )

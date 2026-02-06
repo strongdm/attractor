@@ -1479,7 +1479,7 @@ Later rules of equal specificity override earlier ones. Explicit node attributes
 
 | Property           | Values                     | Description |
 |--------------------|----------------------------|-------------|
-| `llm_model`        | Any model identifier string | Provider-native model ID (e.g., `gpt-4`, `claude-sonnet-4-20250514`) |
+| `llm_model`        | Any model identifier string | Provider-native model ID (e.g., `gpt-5.2`, `claude-opus-4-6`) |
 | `llm_provider`     | Provider key string         | `openai`, `anthropic`, `gemini`, etc. |
 | `reasoning_effort`  | `low`, `medium`, `high`    | Controls reasoning/thinking depth for the LLM |
 
@@ -1487,7 +1487,7 @@ Later rules of equal specificity override earlier ones. Explicit node attributes
 
 The resolution order for any model-related property on a node is:
 
-1. Explicit node attribute (e.g., `llm_model="gpt-4"` on the node) -- highest precedence
+1. Explicit node attribute (e.g., `llm_model="gpt-5.2"` on the node) -- highest precedence
 2. Stylesheet rule matching by specificity (ID > class > universal)
 3. Graph-level default attribute
 4. Handler/system default
@@ -1501,9 +1501,9 @@ digraph Pipeline {
     graph [
         goal="Implement feature X",
         model_stylesheet="
-            * { llm_model: gpt-4; llm_provider: openai; reasoning_effort: high; }
-            .code { llm_model: claude-sonnet-4-20250514; llm_provider: anthropic; }
-            #critical_review { llm_model: o1; reasoning_effort: high; }
+            * { llm_model: claude-sonnet-4-5; llm_provider: anthropic; }
+            .code { llm_model: claude-opus-4-6; llm_provider: anthropic; }
+            #critical_review { llm_model: gpt-5.2; llm_provider: openai; reasoning_effort: high; }
         "
     ]
 
@@ -1519,9 +1519,9 @@ digraph Pipeline {
 ```
 
 In this example:
-- `plan` gets `gpt-4` from the `*` rule (no class match for `.code`).
-- `implement` gets `claude-sonnet-4-20250514` from the `.code` rule.
-- `critical_review` gets `o1` from the `#critical_review` rule (highest specificity), overriding the `.code` class match.
+- `plan` gets `claude-sonnet-4-5` from the `*` rule (no class match for `.code`).
+- `implement` gets `claude-opus-4-6` from the `.code` rule.
+- `critical_review` gets `gpt-5.2` from the `#critical_review` rule (highest specificity), overriding the `.code` class match.
 
 ---
 
@@ -1874,8 +1874,8 @@ This section defines how to validate that an implementation of this spec is comp
 ### 11.10 Model Stylesheet
 
 - [ ] Stylesheet is parsed from the graph's `model_stylesheet` attribute
-- [ ] Selectors by shape name work (e.g., `box { model = "claude-sonnet-4-5" }`)
-- [ ] Selectors by class name work (e.g., `.fast { model = "gemini-2.5-flash" }`)
+- [ ] Selectors by shape name work (e.g., `box { model = "claude-opus-4-6" }`)
+- [ ] Selectors by class name work (e.g., `.fast { model = "gemini-3-flash-preview" }`)
 - [ ] Selectors by node ID work (e.g., `#review { reasoning_effort = "high" }`)
 - [ ] Specificity order: universal < shape < class < ID
 - [ ] Stylesheet properties are overridden by explicit node attributes

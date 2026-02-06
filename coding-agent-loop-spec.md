@@ -387,7 +387,7 @@ The `reasoning_effort` config controls how much reasoning/thinking the model doe
 | "high"   | Deep reasoning. Slower, more expensive. Good for complex tasks. |
 | null     | Provider default (no override).                                 |
 
-Changing `reasoning_effort` mid-session takes effect on the next LLM call. For OpenAI reasoning models (o3, o4-mini), this controls the reasoning token budget. For Anthropic models with extended thinking, this maps to the thinking budget. For Gemini models with thinking, this maps to thinkingConfig.
+Changing `reasoning_effort` mid-session takes effect on the next LLM call. For OpenAI reasoning models (GPT-5.2 series), this controls the reasoning token budget. For Anthropic models with extended thinking, this maps to the thinking budget. For Gemini models with thinking, this maps to thinkingConfig.
 
 ### 2.8 Stop Conditions
 
@@ -583,7 +583,7 @@ TOOL glob:
 
 ### 3.4 OpenAI Profile (codex-rs-aligned)
 
-For GPT-5.2, GPT-5.2-codex, o3, o4-mini, and other OpenAI models. Mirrors the codex-rs toolset.
+For GPT-5.2, GPT-5.2-codex, and other OpenAI models. Mirrors the codex-rs toolset.
 
 **Key difference: `apply_patch` replaces `edit_file` and `write_file` for file modifications.** OpenAI models are specifically trained on this format and produce significantly better edits when using it.
 
