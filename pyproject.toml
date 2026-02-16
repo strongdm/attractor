@@ -8,11 +8,13 @@ requires-python = ">=3.12"
 members = ["packages/*"]
 
 [tool.uv.sources]
+attractor = { workspace = true }
 attractor-llm = { workspace = true }
 attractor-agent = { workspace = true }
 
 [dependency-groups]
 dev = [
+    "attractor",
     "attractor-agent",
     "attractor-llm",
     "pytest>=8.0",
