@@ -9,9 +9,11 @@ members = ["packages/*"]
 
 [tool.uv.sources]
 attractor-llm = { workspace = true }
+attractor-agent = { workspace = true }
 
 [dependency-groups]
 dev = [
+    "attractor-agent",
     "attractor-llm",
     "pytest>=8.0",
     "pytest-cov>=6.0",
