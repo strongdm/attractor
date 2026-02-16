@@ -9,35 +9,35 @@
 - [x] **Phase 5**: SSE parser
 - [x] **Phase 6**: Provider adapter interface + Client core
 - [x] **Phase 7**: Model catalog
-- [ ] **Phase 8**: Anthropic adapter - request translation
-- [ ] **Phase 9**: Anthropic adapter - HTTP + response + streaming
-- [ ] **Phase 10**: OpenAI adapter - request translation (Responses API)
-- [ ] **Phase 11**: OpenAI adapter - HTTP + response + streaming
-- [ ] **Phase 12**: Gemini adapter
-- [ ] **Phase 13**: OpenAI-compatible adapter
-- [ ] **Phase 14**: Client.from_env() + generate()
-- [ ] **Phase 15**: stream(), generate_object(), StreamAccumulator
-- [ ] **Phase 16**: Prompt caching verification
+- [x] **Phase 8**: Anthropic adapter - request translation
+- [x] **Phase 9**: Anthropic adapter - HTTP + response + streaming
+- [x] **Phase 10**: OpenAI adapter - request translation (Responses API)
+- [x] **Phase 11**: OpenAI adapter - HTTP + response + streaming
+- [x] **Phase 12**: Gemini adapter
+- [x] **Phase 13**: OpenAI-compatible adapter
+- [x] **Phase 14**: Client.from_env() + generate()
+- [x] **Phase 15**: stream(), generate_object(), StreamAccumulator
+- [x] **Phase 16**: Prompt caching verification
 
 ## Component 2: Coding Agent Loop (`attractor-agent`)
 
-- [ ] **Phase 17**: Package scaffolding + turn types + events
-- [ ] **Phase 18**: Tool output truncation
-- [ ] **Phase 19**: Tool registry + execution environment interface
-- [ ] **Phase 20**: LocalExecutionEnvironment + shell tool
-- [ ] **Phase 21**: File tools (read_file, write_file, edit_file)
-- [ ] **Phase 22**: Search tools (grep, glob) + apply_patch
-- [ ] **Phase 23**: Provider profiles
-- [ ] **Phase 24**: Session + core agentic loop
-- [ ] **Phase 25**: Steering, follow-up, loop detection
-- [ ] **Phase 26**: Subagent support
+- [x] **Phase 17**: Package scaffolding + turn types + events
+- [x] **Phase 18**: Tool output truncation
+- [x] **Phase 19**: Tool registry + execution environment interface
+- [x] **Phase 20**: LocalExecutionEnvironment + shell tool
+- [x] **Phase 21**: File tools (read_file, write_file, edit_file)
+- [x] **Phase 22**: Search tools (grep, glob) + apply_patch
+- [x] **Phase 23**: Provider profiles
+- [x] **Phase 24**: Session + core agentic loop
+- [x] **Phase 25**: Steering, follow-up, loop detection
+- [x] **Phase 26**: Subagent support
 
 ## Component 3: Pipeline Runner (`attractor`)
 
-- [ ] **Phase 27**: DOT parser
-- [ ] **Phase 28**: Validation + condition language + stylesheet
-- [ ] **Phase 29**: Context, checkpoint, outcome, handlers, interviewer
-- [ ] **Phase 30**: Execution engine + transforms + runner
+- [x] **Phase 27**: DOT parser
+- [x] **Phase 28**: Validation + condition language + stylesheet
+- [x] **Phase 29**: Context, checkpoint, outcome, handlers, interviewer
+- [x] **Phase 30**: Execution engine + transforms + runner
 
 ## Test Count
 
