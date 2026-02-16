@@ -1,0 +1,31 @@
+[project]
+name = "attractor-workspace"
+version = "0.1.0"
+description = "Attractor - Specification-driven AI software factory"
+requires-python = ">=3.12"
+
+[tool.uv.workspace]
+members = ["packages/*"]
+
+[tool.uv.sources]
+attractor-llm = { workspace = true }
+
+[dependency-groups]
+dev = [
+    "attractor-llm",
+    "pytest>=8.0",
+    "pytest-asyncio>=0.24",
+    "respx>=0.22",
+    "ruff>=0.9",
+]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["packages/attractor-llm/tests", "packages/attractor-agent/tests", "packages/attractor/tests"]
+
+[tool.ruff]
+line-length = 99
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W"]
