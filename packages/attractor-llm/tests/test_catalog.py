@@ -1,6 +1,6 @@
 """Tests for the model catalog."""
 
-from attractor_llm.catalog import get_model_info, list_models
+from attractor_llm.catalog import get_latest_model, get_model_info, list_models
 
 
 class TestCatalog:
@@ -41,3 +41,11 @@ class TestCatalog:
             found = get_model_info(alias)
             assert found is not None
             assert found.id == info.id
+
+    def test_get_latest_model_for_provider(self):
+        info = get_latest_model("anthropic")
+        assert info is not None
+        assert info.provider == "anthropic"
+
+    def test_get_latest_model_for_unknown_provider_returns_none(self):
+        assert get_latest_model("unknown-provider") is None

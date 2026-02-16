@@ -158,3 +158,14 @@ def list_models(
     if supports_vision is not None:
         result = [m for m in result if m.supports_vision == supports_vision]
     return result
+
+
+def get_latest_model(provider: str) -> ModelInfo | None:
+    """Return the first listed model for a provider.
+
+    Catalog order is authoritative and kept newest-first per provider.
+    """
+    for model in MODELS:
+        if model.provider == provider:
+            return model
+    return None
