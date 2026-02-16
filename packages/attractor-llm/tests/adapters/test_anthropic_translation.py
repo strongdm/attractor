@@ -47,13 +47,21 @@ def test_translate_request_extracts_system_and_merges_roles():
 
     assert payload["max_tokens"] == 4096
     assert payload["system"] == [
-        {"type": "text", "text": "global safety"},
-        {"type": "text", "text": "team style"},
+        {
+            "type": "text",
+            "text": "global safety",
+            "cache_control": {"type": "ephemeral"},
+        },
+        {
+            "type": "text",
+            "text": "team style",
+            "cache_control": {"type": "ephemeral"},
+        },
     ]
 
     assert [message["role"] for message in payload["messages"]] == ["user", "assistant", "user"]
     assert payload["messages"][0]["content"] == [
-        {"type": "text", "text": "first"},
+        {"type": "text", "text": "first", "cache_control": {"type": "ephemeral"}},
         {"type": "text", "text": "second"},
     ]
     assert payload["messages"][1]["content"][1] == {
@@ -155,3 +163,52 @@ def test_translate_tool_choice_required_and_named():
 
     assert required_payload["tool_choice"] == {"type": "any"}
     assert named_payload["tool_choice"] == {"type": "tool", "name": "search"}
+
+
+def test_prompt_cache_control_injected_for_system_and_first_user_text_block():
+    adapter = AnthropicAdapter(api_key="test-key")
+    request = Request(
+        model="claude-sonnet-4-5-20250929",
+        messages=[
+            Message.system("sys"),
+            Message.user("first"),
+            Message.user("second"),
+        ],
+    )
+
+    payload = adapter._build_payload(request)
+
+    assert payload["system"][0]["cache_control"] == {"type": "ephemeral"}
+    assert payload["messages"][0]["content"][0]["cache_control"] == {"type": "ephemeral"}
+    assert "cache_control" not in payload["messages"][0]["content"][1]
+
+
+def test_cache_control_injection_does_not_override_existing_block_value():
+    adapter = AnthropicAdapter(api_key="test-key")
+    block = {"type": "text", "text": "sys", "cache_control": {"type": "persistent"}}
+
+    adapter._inject_cache_control([block], apply_to_first=False)
+
+    assert block["cache_control"] == {"type": "persistent"}
+
+
+def test_parse_response_maps_prompt_cache_usage_tokens():
+    adapter = AnthropicAdapter(api_key="test-key")
+
+    parsed = adapter._parse_response(
+        {
+            "id": "msg_1",
+            "model": "claude-sonnet-4-5-20250929",
+            "content": [{"type": "text", "text": "ok"}],
+            "stop_reason": "end_turn",
+            "usage": {
+                "input_tokens": 10,
+                "output_tokens": 4,
+                "cache_read_input_tokens": 7,
+                "cache_creation_input_tokens": 5,
+            },
+        }
+    )
+
+    assert parsed.usage.cache_read_tokens == 7
+    assert parsed.usage.cache_write_tokens == 5

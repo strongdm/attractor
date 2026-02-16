@@ -64,15 +64,26 @@ class AnthropicAdapter(ProviderAdapter):
         return headers
 
     def _build_payload(self, request: Request, *, stream: bool = False) -> dict[str, Any]:
+        messages = self._translate_messages(request.messages)
         payload: dict[str, Any] = {
             "model": request.model,
-            "messages": self._translate_messages(request.messages),
+            "messages": messages,
             "max_tokens": request.max_tokens or 4096,
         }
 
         system = self._extract_system(request.messages)
         if system:
+            self._inject_cache_control(system, apply_to_first=False)
             payload["system"] = system
+
+        for message in messages:
+            if message.get("role") != "user":
+                continue
+            content = message.get("content")
+            if isinstance(content, list) and self._inject_cache_control(
+                content, apply_to_first=True
+            ):
+                break
 
         if request.temperature is not None:
             payload["temperature"] = request.temperature
@@ -103,8 +114,8 @@ class AnthropicAdapter(ProviderAdapter):
 
         return payload
 
-    def _extract_system(self, messages: list[Message]) -> list[dict[str, str]]:
-        system_blocks: list[dict[str, str]] = []
+    def _extract_system(self, messages: list[Message]) -> list[dict[str, Any]]:
+        system_blocks: list[dict[str, Any]] = []
 
         for message in messages:
             if message.role not in (Role.SYSTEM, Role.DEVELOPER):
@@ -115,6 +126,24 @@ class AnthropicAdapter(ProviderAdapter):
                     system_blocks.append({"type": "text", "text": part.text})
 
         return system_blocks
+
+    def _inject_cache_control(
+        self,
+        blocks: list[dict[str, Any]],
+        *,
+        apply_to_first: bool,
+    ) -> bool:
+        for block in blocks:
+            if block.get("type") != "text":
+                continue
+
+            if "cache_control" not in block:
+                block["cache_control"] = {"type": "ephemeral"}
+
+            if apply_to_first:
+                return True
+
+        return False
 
     def _translate_messages(self, messages: list[Message]) -> list[dict[str, Any]]:
         translated: list[dict[str, Any]] = []

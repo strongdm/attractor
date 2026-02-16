@@ -2,6 +2,12 @@
 
 import pytest
 
+from attractor_llm.adapters import (
+    AnthropicAdapter,
+    GeminiAdapter,
+    OpenAIAdapter,
+    OpenAICompatAdapter,
+)
 from attractor_llm.adapters.base import ProviderAdapter
 from attractor_llm.client import Client, get_default_client, set_default_client
 from attractor_llm.errors import ConfigurationError
@@ -189,3 +195,56 @@ class TestDefaultClient:
     def test_get_unset_returns_none(self):
         set_default_client(None)
         assert get_default_client() is None
+
+
+class TestClientFromEnv:
+    def test_from_env_raises_when_no_keys(self):
+        with pytest.raises(ConfigurationError, match="No providers configured"):
+            Client.from_env(environ={})
+
+    def test_from_env_configures_openai_and_sets_default(self):
+        client = Client.from_env(environ={"OPENAI_API_KEY": "openai-key"})
+
+        assert list(client._providers.keys()) == ["openai"]
+        assert isinstance(client._providers["openai"], OpenAIAdapter)
+        assert client._default_provider == "openai"
+
+    def test_from_env_uses_google_key_for_gemini(self):
+        client = Client.from_env(environ={"GOOGLE_API_KEY": "google-key"})
+
+        assert list(client._providers.keys()) == ["gemini"]
+        assert isinstance(client._providers["gemini"], GeminiAdapter)
+
+    def test_from_env_registers_all_known_providers_in_order(self):
+        client = Client.from_env(
+            environ={
+                "OPENAI_API_KEY": "openai-key",
+                "ANTHROPIC_API_KEY": "anthropic-key",
+                "GEMINI_API_KEY": "gemini-key",
+                "OPENAI_COMPAT_API_KEY": "compat-key",
+            }
+        )
+
+        assert list(client._providers.keys()) == [
+            "openai",
+            "anthropic",
+            "gemini",
+            "openai_compat",
+        ]
+        assert isinstance(client._providers["openai"], OpenAIAdapter)
+        assert isinstance(client._providers["anthropic"], AnthropicAdapter)
+        assert isinstance(client._providers["gemini"], GeminiAdapter)
+        assert isinstance(client._providers["openai_compat"], OpenAICompatAdapter)
+        assert client._default_provider == "openai"
+
+    def test_from_env_passes_openai_compat_base_url(self):
+        client = Client.from_env(
+            environ={
+                "OPENAI_COMPAT_API_KEY": "compat-key",
+                "OPENAI_COMPAT_BASE_URL": "https://compat.example/v2/",
+            }
+        )
+
+        adapter = client._providers["openai_compat"]
+        assert isinstance(adapter, OpenAICompatAdapter)
+        assert adapter._base_url == "https://compat.example/v2"

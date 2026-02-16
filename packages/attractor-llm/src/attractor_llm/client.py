@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+from collections.abc import Mapping
 from typing import Any, AsyncIterator, Awaitable, Callable
 
 from attractor_llm.adapters.base import ProviderAdapter
@@ -39,6 +41,45 @@ class Client:
         self._providers = providers
         self._default_provider = default_provider
         self._middleware = middleware or []
+
+    @classmethod
+    def from_env(cls, *, environ: Mapping[str, str] | None = None) -> Client:
+        """Build a client from provider API keys in the environment."""
+        from attractor_llm.adapters import (
+            AnthropicAdapter,
+            GeminiAdapter,
+            OpenAIAdapter,
+            OpenAICompatAdapter,
+        )
+
+        env = environ or os.environ
+        providers: dict[str, ProviderAdapter] = {}
+
+        openai_key = env.get("OPENAI_API_KEY")
+        if openai_key:
+            providers["openai"] = OpenAIAdapter(api_key=openai_key)
+
+        anthropic_key = env.get("ANTHROPIC_API_KEY")
+        if anthropic_key:
+            providers["anthropic"] = AnthropicAdapter(api_key=anthropic_key)
+
+        gemini_key = env.get("GEMINI_API_KEY") or env.get("GOOGLE_API_KEY")
+        if gemini_key:
+            providers["gemini"] = GeminiAdapter(api_key=gemini_key)
+
+        openai_compat_key = env.get("OPENAI_COMPAT_API_KEY")
+        if openai_compat_key:
+            base_url = env.get("OPENAI_COMPAT_BASE_URL") or "https://api.openai.com"
+            providers["openai_compat"] = OpenAICompatAdapter(
+                api_key=openai_compat_key,
+                base_url=base_url,
+            )
+
+        if not providers:
+            raise ConfigurationError("No providers configured from environment")
+
+        default_provider = next(iter(providers.keys()))
+        return cls(providers=providers, default_provider=default_provider)
 
     def _resolve_adapter(self, request: Request) -> ProviderAdapter:
         """Resolve which adapter to use for this request."""
