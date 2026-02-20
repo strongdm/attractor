@@ -15,7 +15,7 @@ Although bringing your own agentic loop and unified LLM SDK is not required to b
 Supply the following prompt to a modern coding agent (Claude Code, Codex, OpenCode, Amp, Cursor, etc):
 
 ```
-codeagent> Implement Attractor as described by https://factory.strongdm.ai/
+codeagent> Implement Attractor as described by https://github.com/strongdm/attractor
 ```
 
 ## Terminology
