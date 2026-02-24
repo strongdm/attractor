@@ -11,15 +11,16 @@ export function SelectTrigger({ className, children, ...props }: React.Component
   return (
     <SelectPrimitive.Trigger
       className={cn(
-        "flex h-10 w-full items-center justify-between rounded-md border border-input bg-background px-3 py-2 text-sm",
-        "placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring disabled:opacity-50",
+        "flex h-10 w-full items-center justify-between rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm transition-colors",
+        "placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-1",
+        "disabled:cursor-not-allowed disabled:opacity-50 data-[placeholder]:text-muted-foreground",
         className
       )}
       {...props}
     >
       {children}
       <SelectPrimitive.Icon asChild>
-        <ChevronDown className="h-4 w-4 opacity-50" />
+        <ChevronDown className="h-4 w-4 opacity-60" />
       </SelectPrimitive.Icon>
     </SelectPrimitive.Trigger>
   );
@@ -30,9 +31,11 @@ export function SelectContent({ className, children, ...props }: React.Component
     <SelectPrimitive.Portal>
       <SelectPrimitive.Content
         className={cn(
-          "relative z-50 max-h-96 min-w-[8rem] overflow-hidden rounded-md border bg-popover text-popover-foreground shadow-md",
+          "relative z-50 max-h-80 min-w-[12rem] overflow-hidden rounded-md border border-border bg-popover text-popover-foreground shadow-xl",
           className
         )}
+        position="popper"
+        sideOffset={6}
         {...props}
       >
         <SelectPrimitive.Viewport className="p-1">{children}</SelectPrimitive.Viewport>
@@ -45,8 +48,9 @@ export function SelectItem({ className, children, ...props }: React.ComponentPro
   return (
     <SelectPrimitive.Item
       className={cn(
-        "relative flex w-full cursor-default select-none items-center rounded-sm py-1.5 pl-8 pr-2 text-sm outline-none",
-        "focus:bg-accent focus:text-accent-foreground data-[disabled]:pointer-events-none data-[disabled]:opacity-50",
+        "relative flex w-full cursor-default select-none items-center rounded-sm py-2 pl-8 pr-2 text-sm text-foreground outline-none transition-colors",
+        "focus:bg-muted focus:text-foreground data-[state=checked]:bg-secondary data-[state=checked]:text-secondary-foreground",
+        "data-[disabled]:pointer-events-none data-[disabled]:opacity-50",
         className
       )}
       {...props}

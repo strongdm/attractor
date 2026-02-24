@@ -3,23 +3,30 @@ import { Link, useSearchParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 
-import { createProject, listProjects } from "../lib/api";
+import { createProject, listProjectsPage } from "../lib/api";
+import { applyFilterState, hasProjectSearchFilter, parseProjectFilterState } from "../lib/filter-state";
+import type { PageState } from "../lib/types";
 import { PageTitle } from "../components/layout/page-title";
+import { DataStatePanel } from "../components/common/data-state-panel";
+import { SectionHeader } from "../components/common/section-header";
 import { Button } from "../components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../components/ui/card";
+import { Field } from "../components/ui/field";
 import { Input } from "../components/ui/input";
-import { Label } from "../components/ui/label";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../components/ui/table";
 
 export function ProjectsPage() {
   const [searchParams, setSearchParams] = useSearchParams();
+  const filters = parseProjectFilterState(searchParams);
+
   const queryClient = useQueryClient();
   const [name, setName] = useState("");
   const [namespace, setNamespace] = useState("");
 
-  const query = useQuery({ queryKey: ["projects"], queryFn: listProjects });
-
-  const search = searchParams.get("q") ?? "";
+  const projectsQuery = useQuery({
+    queryKey: ["projects-page", filters.query],
+    queryFn: () => listProjectsPage({ query: filters.query, limit: 100 })
+  });
 
   const createMutation = useMutation({
     mutationFn: createProject,
@@ -28,78 +35,105 @@ export function ProjectsPage() {
       setName("");
       setNamespace("");
       void queryClient.invalidateQueries({ queryKey: ["projects"] });
+      void queryClient.invalidateQueries({ queryKey: ["projects-page"] });
     },
     onError: (error) => {
       toast.error(error instanceof Error ? error.message : String(error));
     }
   });
 
-  const filteredProjects = useMemo(() => {
-    const needle = search.trim().toLowerCase();
-    if (!needle) {
-      return query.data ?? [];
-    }
-    return (query.data ?? []).filter((project) => {
-      return (
-        project.name.toLowerCase().includes(needle) ||
-        project.namespace.toLowerCase().includes(needle) ||
-        (project.repoFullName ?? "").toLowerCase().includes(needle)
-      );
-    });
-  }, [query.data, search]);
+  const projects = projectsQuery.data?.items ?? [];
+  const state: PageState = projectsQuery.isLoading
+    ? "loading"
+    : projectsQuery.isError
+    ? "error"
+    : projects.length === 0
+    ? "empty"
+    : "ready";
+
+  const hasSearch = hasProjectSearchFilter({ query: filters.query });
+
+  const normalizedProjects = useMemo(() => projects, [projects]);
 
   return (
     <div>
-      <PageTitle title="Projects" description="Create project namespaces and connect repositories." />
+      <PageTitle title="Projects" description="Create and manage project namespaces and repository bindings." />
 
       <div className="grid gap-4 lg:grid-cols-[2fr,1fr]">
         <Card>
           <CardHeader>
-            <CardTitle>Project Registry</CardTitle>
-            <CardDescription>Search and open project spaces.</CardDescription>
+            <SectionHeader title="Project Registry" description="Searchable project list with quick access." />
           </CardHeader>
-          <CardContent>
+          <CardContent className="space-y-3">
             <Input
-              value={search}
+              id="project-search"
+              name="projectSearch"
+              value={filters.query ?? ""}
               onChange={(event) => {
-                const next = event.target.value;
-                const params = new URLSearchParams(searchParams);
-                if (next.trim().length > 0) {
-                  params.set("q", next);
-                } else {
-                  params.delete("q");
-                }
-                setSearchParams(params, { replace: true });
+                const next = applyFilterState(searchParams, { query: event.target.value });
+                setSearchParams(next, { replace: true });
               }}
               placeholder="Search by name, namespace, or repo"
-              className="mb-3"
+              aria-label="Search projects"
             />
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Name</TableHead>
-                  <TableHead>Namespace</TableHead>
-                  <TableHead>Repository</TableHead>
-                  <TableHead className="w-[120px]">Actions</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {filteredProjects.map((project) => (
-                  <TableRow key={project.id}>
-                    <TableCell>{project.name}</TableCell>
-                    <TableCell className="mono text-xs">{project.namespace}</TableCell>
-                    <TableCell>{project.repoFullName ?? "Not connected"}</TableCell>
-                    <TableCell>
-                      <Button asChild size="sm" variant="outline">
+
+            <DataStatePanel
+              state={state}
+              title={projectsQuery.isError ? "Failed to load projects" : "No projects found"}
+              message={
+                projectsQuery.isError
+                  ? projectsQuery.error instanceof Error
+                    ? projectsQuery.error.message
+                    : "Unknown error"
+                  : hasSearch
+                  ? "Try another search term."
+                  : "Create your first project to begin."
+              }
+              onRetry={projectsQuery.isError ? () => void projectsQuery.refetch() : undefined}
+            />
+
+            {state === "ready" ? (
+              <>
+                <div className="hidden md:block">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Name</TableHead>
+                        <TableHead>Namespace</TableHead>
+                        <TableHead>Repository</TableHead>
+                        <TableHead className="w-[120px]">Actions</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {normalizedProjects.map((project) => (
+                        <TableRow key={project.id}>
+                          <TableCell className="font-medium">{project.name}</TableCell>
+                          <TableCell className="mono text-xs">{project.namespace}</TableCell>
+                          <TableCell>{project.repoFullName ?? "Not connected"}</TableCell>
+                          <TableCell>
+                            <Button asChild size="sm" variant="outline">
+                              <Link to={`/projects/${project.id}`}>Open</Link>
+                            </Button>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
+
+                <div className="grid gap-2 md:hidden">
+                  {normalizedProjects.map((project) => (
+                    <div key={project.id} className="rounded-md border border-border bg-background p-3">
+                      <p className="font-medium">{project.name}</p>
+                      <p className="mono mt-1 text-xs text-muted-foreground">{project.namespace}</p>
+                      <p className="mt-2 text-sm text-muted-foreground">{project.repoFullName ?? "Not connected"}</p>
+                      <Button asChild variant="outline" size="sm" className="mt-3 w-full">
                         <Link to={`/projects/${project.id}`}>Open</Link>
                       </Button>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-            {filteredProjects.length === 0 ? (
-              <p className="mt-3 text-sm text-muted-foreground">No projects match your search.</p>
+                    </div>
+                  ))}
+                </div>
+              </>
             ) : null}
           </CardContent>
         </Card>
@@ -126,19 +160,26 @@ export function ProjectsPage() {
                 });
               }}
             >
-              <div className="space-y-1">
-                <Label htmlFor="project-name">Project Name</Label>
-                <Input id="project-name" value={name} onChange={(event) => setName(event.target.value)} />
-              </div>
-              <div className="space-y-1">
-                <Label htmlFor="project-namespace">Namespace (optional)</Label>
+              <Field id="project-name" label="Project Name" required>
+                <Input
+                  id="project-name"
+                  name="projectName"
+                  value={name}
+                  onChange={(event) => setName(event.target.value)}
+                  required
+                />
+              </Field>
+
+              <Field id="project-namespace" label="Namespace" hint="Optional override for deterministic namespace name.">
                 <Input
                   id="project-namespace"
+                  name="projectNamespace"
                   value={namespace}
                   onChange={(event) => setNamespace(event.target.value)}
                 />
-              </div>
-              <Button type="submit" disabled={createMutation.isPending}>
+              </Field>
+
+              <Button type="submit" disabled={createMutation.isPending} className="w-full">
                 {createMutation.isPending ? "Creating..." : "Create Project"}
               </Button>
             </form>

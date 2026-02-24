@@ -1,6 +1,6 @@
+import { useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useMemo, useState } from "react";
 import { toast } from "sonner";
 
 import {
@@ -10,11 +10,14 @@ import {
   listProjects,
   listProjectSecrets
 } from "../lib/api";
+import type { PageState } from "../lib/types";
 import { PageTitle } from "../components/layout/page-title";
+import { DataStatePanel } from "../components/common/data-state-panel";
+import { SectionHeader } from "../components/common/section-header";
 import { Button } from "../components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../components/ui/card";
+import { Field } from "../components/ui/field";
 import { Input } from "../components/ui/input";
-import { Label } from "../components/ui/label";
 
 export function ProjectOverviewPage() {
   const params = useParams<{ projectId: string }>();
@@ -25,10 +28,10 @@ export function ProjectOverviewPage() {
   const [repoFullName, setRepoFullName] = useState("");
   const [defaultBranch, setDefaultBranch] = useState("main");
 
-  const projectsQuery = useQuery({ queryKey: ["projects"], queryFn: listProjects });
+  const projectsQuery = useQuery({ queryKey: ["projects"], queryFn: () => listProjects({ limit: 200 }) });
   const runsQuery = useQuery({
     queryKey: ["project-runs", projectId],
-    queryFn: () => listProjectRuns(projectId),
+    queryFn: () => listProjectRuns(projectId, { limit: 5 }),
     enabled: projectId.length > 0
   });
   const attractorsQuery = useQuery({
@@ -47,6 +50,15 @@ export function ProjectOverviewPage() {
     [projectsQuery.data, projectId]
   );
 
+  useEffect(() => {
+    if (!project) {
+      return;
+    }
+    setInstallationId(project.githubInstallationId ?? "");
+    setRepoFullName(project.repoFullName ?? "");
+    setDefaultBranch(project.defaultBranch ?? "main");
+  }, [project]);
+
   const connectMutation = useMutation({
     mutationFn: (input: { installationId: string; repoFullName: string; defaultBranch: string }) =>
       connectProjectRepo(projectId, input),
@@ -59,8 +71,31 @@ export function ProjectOverviewPage() {
     }
   });
 
-  if (!project) {
-    return <p className="text-sm text-muted-foreground">Project not found.</p>;
+  const state: PageState = projectsQuery.isLoading
+    ? "loading"
+    : projectsQuery.isError
+    ? "error"
+    : project
+    ? "ready"
+    : "empty";
+
+  if (state !== "ready" || !project) {
+    return (
+      <DataStatePanel
+        state={state}
+        title={state === "loading" ? "Loading project" : state === "error" ? "Failed to load project" : "Project not found"}
+        message={
+          state === "loading"
+            ? "Fetching project context..."
+            : state === "error"
+            ? projectsQuery.error instanceof Error
+              ? projectsQuery.error.message
+              : "Unknown error"
+            : "Select another project from the project switcher."
+        }
+        onRetry={state === "error" ? () => void projectsQuery.refetch() : undefined}
+      />
+    );
   }
 
   return (
@@ -78,13 +113,13 @@ export function ProjectOverviewPage() {
       <div className="grid gap-4 md:grid-cols-3">
         <Card>
           <CardHeader>
-            <CardDescription>Runs</CardDescription>
+            <CardDescription>Recent Runs</CardDescription>
             <CardTitle>{runsQuery.data?.length ?? 0}</CardTitle>
           </CardHeader>
         </Card>
         <Card>
           <CardHeader>
-            <CardDescription>Attractors</CardDescription>
+            <CardDescription>Registered Attractors</CardDescription>
             <CardTitle>{attractorsQuery.data?.length ?? 0}</CardTitle>
           </CardHeader>
         </Card>
@@ -99,8 +134,10 @@ export function ProjectOverviewPage() {
       <div className="mt-6 grid gap-4 lg:grid-cols-[2fr,1fr]">
         <Card>
           <CardHeader>
-            <CardTitle>Repository Connection</CardTitle>
-            <CardDescription>GitHub App installation metadata for branch + PR operations.</CardDescription>
+            <SectionHeader
+              title="Repository Connection"
+              description="GitHub App installation and repository metadata used for branch and PR operations."
+            />
           </CardHeader>
           <CardContent>
             <form
@@ -118,35 +155,41 @@ export function ProjectOverviewPage() {
                 });
               }}
             >
-              <div className="space-y-1">
-                <Label htmlFor="installation-id">Installation ID</Label>
+              <Field id="installation-id" label="Installation ID" required>
                 <Input
                   id="installation-id"
+                  name="installationId"
                   value={installationId}
                   onChange={(event) => setInstallationId(event.target.value)}
-                  placeholder={project.githubInstallationId ?? "123456"}
+                  placeholder="123456"
+                  required
                 />
-              </div>
-              <div className="space-y-1">
-                <Label htmlFor="repo-name">Repository</Label>
+              </Field>
+
+              <Field id="repo-full-name" label="Repository" required>
                 <Input
-                  id="repo-name"
+                  id="repo-full-name"
+                  name="repoFullName"
                   value={repoFullName}
                   onChange={(event) => setRepoFullName(event.target.value)}
-                  placeholder={project.repoFullName ?? "owner/repo"}
+                  placeholder="owner/repo"
+                  required
                 />
-              </div>
-              <div className="space-y-1">
-                <Label htmlFor="default-branch">Default Branch</Label>
+              </Field>
+
+              <Field id="default-branch" label="Default Branch" required>
                 <Input
                   id="default-branch"
+                  name="defaultBranch"
                   value={defaultBranch}
                   onChange={(event) => setDefaultBranch(event.target.value)}
-                  placeholder={project.defaultBranch ?? "main"}
+                  placeholder="main"
+                  required
                 />
-              </div>
+              </Field>
+
               <div className="flex items-end">
-                <Button type="submit" disabled={connectMutation.isPending}>
+                <Button type="submit" disabled={connectMutation.isPending} className="w-full md:w-auto">
                   {connectMutation.isPending ? "Saving..." : "Save Connection"}
                 </Button>
               </div>
@@ -156,10 +199,13 @@ export function ProjectOverviewPage() {
 
         <Card>
           <CardHeader>
-            <CardTitle>Context</CardTitle>
-            <CardDescription>Current project metadata.</CardDescription>
+            <CardTitle>Project Context</CardTitle>
+            <CardDescription>Current metadata snapshot.</CardDescription>
           </CardHeader>
           <CardContent className="space-y-2 text-sm">
+            <p>
+              <span className="text-muted-foreground">ID:</span> <span className="mono text-xs">{project.id}</span>
+            </p>
             <p>
               <span className="text-muted-foreground">Repo:</span> {project.repoFullName ?? "Not connected"}
             </p>

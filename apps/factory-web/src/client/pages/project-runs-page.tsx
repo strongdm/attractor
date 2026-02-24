@@ -7,26 +7,33 @@ import {
   createRun,
   listAttractors,
   listModels,
-  listProjectRuns,
+  listProjectRunsPage,
   listProviders
 } from "../lib/api";
-import type { RunType } from "../lib/types";
+import { applyFilterState, hasActiveFilters, parseRunFilterState } from "../lib/filter-state";
+import type { PageState, RunType } from "../lib/types";
+import { DataStatePanel } from "../components/common/data-state-panel";
+import { FilterBar } from "../components/common/filter-bar";
+import { SectionHeader } from "../components/common/section-header";
+import { StatusPill } from "../components/common/status-pill";
 import { PageTitle } from "../components/layout/page-title";
-import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../components/ui/card";
+import { Field } from "../components/ui/field";
 import { Input } from "../components/ui/input";
-import { Label } from "../components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../components/ui/table";
 
 const RUN_STATUSES = ["all", "QUEUED", "RUNNING", "SUCCEEDED", "FAILED", "CANCELED", "TIMEOUT"] as const;
+const RUN_TYPES = ["all", "planning", "implementation"] as const;
+const REASONING_LEVELS = ["minimal", "low", "medium", "high", "xhigh"] as const;
 
 export function ProjectRunsPage() {
   const params = useParams<{ projectId: string }>();
   const projectId = params.projectId ?? "";
   const queryClient = useQueryClient();
   const [searchParams, setSearchParams] = useSearchParams();
+  const filters = parseRunFilterState(searchParams);
 
   const [runType, setRunType] = useState<RunType>("planning");
   const [attractorDefId, setAttractorDefId] = useState("");
@@ -40,8 +47,14 @@ export function ProjectRunsPage() {
   const [maxTokens, setMaxTokens] = useState("");
 
   const runsQuery = useQuery({
-    queryKey: ["project-runs", projectId],
-    queryFn: () => listProjectRuns(projectId),
+    queryKey: ["project-runs-page", projectId, filters.status, filters.runType, filters.branch],
+    queryFn: () =>
+      listProjectRunsPage(projectId, {
+        status: filters.status,
+        runType: filters.runType,
+        branch: filters.branch,
+        limit: 100
+      }),
     enabled: projectId.length > 0
   });
   const attractorsQuery = useQuery({
@@ -56,27 +69,24 @@ export function ProjectRunsPage() {
     enabled: provider.length > 0
   });
 
-  const statusFilter = searchParams.get("status") ?? "all";
-  const runTypeFilter = searchParams.get("runType") ?? "all";
-  const branchFilter = searchParams.get("branch") ?? "";
+  const runs = runsQuery.data?.items ?? [];
+  const hasFilters = hasActiveFilters({
+    status: filters.status,
+    runType: filters.runType,
+    branch: filters.branch
+  });
+  const runsState: PageState = runsQuery.isLoading
+    ? "loading"
+    : runsQuery.isError
+    ? "error"
+    : runs.length === 0
+    ? "empty"
+    : "ready";
 
-  const filteredRuns = useMemo(() => {
-    return (runsQuery.data ?? []).filter((run) => {
-      if (statusFilter !== "all" && run.status !== statusFilter) {
-        return false;
-      }
-      if (runTypeFilter !== "all" && run.runType !== runTypeFilter) {
-        return false;
-      }
-      if (branchFilter.trim().length > 0) {
-        const needle = branchFilter.toLowerCase();
-        return (
-          run.sourceBranch.toLowerCase().includes(needle) || run.targetBranch.toLowerCase().includes(needle)
-        );
-      }
-      return true;
-    });
-  }, [branchFilter, runTypeFilter, runsQuery.data, statusFilter]);
+  const selectedAttractor = useMemo(
+    () => (attractorDefId ? (attractorsQuery.data ?? []).find((item) => item.id === attractorDefId) : undefined),
+    [attractorDefId, attractorsQuery.data]
+  );
 
   const createRunMutation = useMutation({
     mutationFn: () => {
@@ -86,27 +96,43 @@ export function ProjectRunsPage() {
       if (!modelId) {
         throw new Error("Model ID is required");
       }
+      if (sourceBranch.trim().length === 0 || targetBranch.trim().length === 0) {
+        throw new Error("Source and target branches are required");
+      }
+
+      const parsedTemperature = Number.parseFloat(temperature);
+      if (Number.isNaN(parsedTemperature)) {
+        throw new Error("Temperature must be a valid number");
+      }
+
+      if (runType === "implementation" && specBundleId.trim().length === 0) {
+        throw new Error("Implementation runs require a spec bundle ID");
+      }
+
+      const parsedMaxTokens = maxTokens.trim().length > 0 ? Number.parseInt(maxTokens, 10) : undefined;
+      if (parsedMaxTokens !== undefined && Number.isNaN(parsedMaxTokens)) {
+        throw new Error("Max tokens must be a valid integer");
+      }
 
       return createRun({
         projectId,
         attractorDefId,
         runType,
-        sourceBranch,
-        targetBranch,
-        ...(runType === "implementation" && specBundleId.trim().length > 0
-          ? { specBundleId: specBundleId.trim() }
-          : {}),
+        sourceBranch: sourceBranch.trim(),
+        targetBranch: targetBranch.trim(),
+        ...(runType === "implementation" ? { specBundleId: specBundleId.trim() } : {}),
         modelConfig: {
           provider,
           modelId,
           reasoningLevel: reasoningLevel as "minimal" | "low" | "medium" | "high" | "xhigh",
-          temperature: Number.parseFloat(temperature),
-          ...(maxTokens.trim().length > 0 ? { maxTokens: Number.parseInt(maxTokens, 10) } : {})
+          temperature: parsedTemperature,
+          ...(parsedMaxTokens !== undefined ? { maxTokens: parsedMaxTokens } : {})
         }
       });
     },
     onSuccess: (payload) => {
       toast.success(`Run queued: ${payload.runId}`);
+      void queryClient.invalidateQueries({ queryKey: ["project-runs-page", projectId] });
       void queryClient.invalidateQueries({ queryKey: ["project-runs", projectId] });
     },
     onError: (error) => {
@@ -114,44 +140,34 @@ export function ProjectRunsPage() {
     }
   });
 
-  const statusVariant = (status: string): "success" | "secondary" | "destructive" | "warning" => {
-    if (status === "SUCCEEDED") {
-      return "success";
-    }
-    if (status === "FAILED") {
-      return "destructive";
-    }
-    if (status === "RUNNING") {
-      return "warning";
-    }
-    return "secondary";
-  };
-
   return (
     <div>
-      <PageTitle title="Runs" description="Launch planning or implementation runs and monitor history." />
+      <PageTitle title="Runs" description="Launch branch-isolated planning and implementation runs." />
 
       <div className="grid gap-4 lg:grid-cols-[2fr,1fr]">
         <Card>
           <CardHeader>
-            <CardTitle>Run History</CardTitle>
-            <CardDescription>Filters are URL-synced for sharable deep links.</CardDescription>
+            <SectionHeader
+              title="Run History"
+              description="Filter by status, run type, and branch. Filters are URL-synced for deep links."
+            />
           </CardHeader>
-          <CardContent>
-            <div className="mb-3 grid gap-2 md:grid-cols-3">
+          <CardContent className="space-y-3">
+            <FilterBar
+              hasActiveFilters={hasFilters}
+              onReset={() => {
+                setSearchParams(new URLSearchParams(), { replace: true });
+              }}
+            >
               <Select
-                value={statusFilter}
+                value={filters.status ?? "all"}
                 onValueChange={(value) => {
-                  const next = new URLSearchParams(searchParams);
-                  if (value === "all") {
-                    next.delete("status");
-                  } else {
-                    next.set("status", value);
-                  }
-                  setSearchParams(next, { replace: true });
+                  setSearchParams(applyFilterState(searchParams, { status: value as (typeof RUN_STATUSES)[number] }), {
+                    replace: true
+                  });
                 }}
               >
-                <SelectTrigger>
+                <SelectTrigger aria-label="Filter by run status">
                   <SelectValue placeholder="Status" />
                 </SelectTrigger>
                 <SelectContent>
@@ -164,86 +180,113 @@ export function ProjectRunsPage() {
               </Select>
 
               <Select
-                value={runTypeFilter}
+                value={filters.runType ?? "all"}
                 onValueChange={(value) => {
-                  const next = new URLSearchParams(searchParams);
-                  if (value === "all") {
-                    next.delete("runType");
-                  } else {
-                    next.set("runType", value);
-                  }
-                  setSearchParams(next, { replace: true });
+                  setSearchParams(applyFilterState(searchParams, { runType: value as (typeof RUN_TYPES)[number] }), {
+                    replace: true
+                  });
                 }}
               >
-                <SelectTrigger>
+                <SelectTrigger aria-label="Filter by run type">
                   <SelectValue placeholder="Run type" />
                 </SelectTrigger>
                 <SelectContent>
-                  {[
-                    { label: "all", value: "all" },
-                    { label: "planning", value: "planning" },
-                    { label: "implementation", value: "implementation" }
-                  ].map((item) => (
-                    <SelectItem key={item.value} value={item.value}>
-                      {item.label}
+                  {RUN_TYPES.map((item) => (
+                    <SelectItem key={item} value={item}>
+                      {item}
                     </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
 
               <Input
-                value={branchFilter}
+                id="runs-branch-filter"
+                name="runsBranchFilter"
+                value={filters.branch ?? ""}
                 onChange={(event) => {
-                  const next = new URLSearchParams(searchParams);
-                  const branch = event.target.value;
-                  if (branch.trim().length > 0) {
-                    next.set("branch", branch);
-                  } else {
-                    next.delete("branch");
-                  }
-                  setSearchParams(next, { replace: true });
+                  setSearchParams(applyFilterState(searchParams, { branch: event.target.value }), { replace: true });
                 }}
                 placeholder="Filter source or target branch"
+                aria-label="Filter by branch"
               />
-            </div>
+            </FilterBar>
 
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Run</TableHead>
-                  <TableHead>Type</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead>Source</TableHead>
-                  <TableHead>Target</TableHead>
-                  <TableHead>Action</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {filteredRuns.map((run) => (
-                  <TableRow key={run.id}>
-                    <TableCell className="mono text-xs">{run.id.slice(0, 12)}</TableCell>
-                    <TableCell>{run.runType}</TableCell>
-                    <TableCell>
-                      <Badge variant={statusVariant(run.status)}>{run.status}</Badge>
-                    </TableCell>
-                    <TableCell className="mono text-xs">{run.sourceBranch}</TableCell>
-                    <TableCell className="mono text-xs">{run.targetBranch}</TableCell>
-                    <TableCell>
-                      <Button asChild variant="outline" size="sm">
-                        <Link to={`/runs/${run.id}`}>Open</Link>
+            <DataStatePanel
+              state={runsState}
+              title={runsQuery.isError ? "Failed to load runs" : "No runs found"}
+              message={
+                runsQuery.isError
+                  ? runsQuery.error instanceof Error
+                    ? runsQuery.error.message
+                    : "Unknown error"
+                  : hasFilters
+                  ? "No runs match the selected filters."
+                  : "Start a planning run to create your first spec bundle."
+              }
+              onRetry={runsQuery.isError ? () => void runsQuery.refetch() : undefined}
+            />
+
+            {runsState === "ready" ? (
+              <>
+                <div className="hidden md:block">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Run</TableHead>
+                        <TableHead>Type</TableHead>
+                        <TableHead>Status</TableHead>
+                        <TableHead>Source</TableHead>
+                        <TableHead>Target</TableHead>
+                        <TableHead className="w-[110px]">Action</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {runs.map((run) => (
+                        <TableRow key={run.id}>
+                          <TableCell className="mono text-xs">{run.id.slice(0, 12)}</TableCell>
+                          <TableCell>{run.runType}</TableCell>
+                          <TableCell>
+                            <StatusPill status={run.status} />
+                          </TableCell>
+                          <TableCell className="mono text-xs">{run.sourceBranch}</TableCell>
+                          <TableCell className="mono text-xs">{run.targetBranch}</TableCell>
+                          <TableCell>
+                            <Button asChild variant="outline" size="sm">
+                              <Link to={`/runs/${run.id}`}>Open</Link>
+                            </Button>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
+
+                <div className="grid gap-2 md:hidden">
+                  {runs.map((run) => (
+                    <div key={run.id} className="rounded-lg border border-border bg-background p-3">
+                      <div className="flex items-start justify-between gap-2">
+                        <p className="mono text-xs">{run.id}</p>
+                        <StatusPill status={run.status} />
+                      </div>
+                      <p className="mt-2 text-sm">{run.runType}</p>
+                      <p className="mono mt-1 text-xs text-muted-foreground">
+                        {run.sourceBranch} → {run.targetBranch}
+                      </p>
+                      <Button asChild variant="outline" size="sm" className="mt-3 w-full">
+                        <Link to={`/runs/${run.id}`}>Open Run</Link>
                       </Button>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
+                    </div>
+                  ))}
+                </div>
+              </>
+            ) : null}
           </CardContent>
         </Card>
 
         <Card>
           <CardHeader>
             <CardTitle>Launch Run</CardTitle>
-            <CardDescription>One pod per run, branch-isolated in the project namespace.</CardDescription>
+            <CardDescription>One run creates one Kubernetes Job and one runner pod.</CardDescription>
           </CardHeader>
           <CardContent>
             <form
@@ -253,15 +296,9 @@ export function ProjectRunsPage() {
                 createRunMutation.mutate();
               }}
             >
-              <div className="space-y-1">
-                <Label>Attractor</Label>
-                <Select
-                  value={attractorDefId.length > 0 ? attractorDefId : undefined}
-                  onValueChange={(value) => {
-                    setAttractorDefId(value);
-                  }}
-                >
-                  <SelectTrigger>
+              <Field id="run-attractor" label="Attractor" required>
+                <Select value={attractorDefId.length > 0 ? attractorDefId : undefined} onValueChange={setAttractorDefId}>
+                  <SelectTrigger id="run-attractor" aria-label="Select attractor" name="attractorDefId">
                     <SelectValue placeholder="Select attractor" />
                   </SelectTrigger>
                   <SelectContent>
@@ -272,11 +309,19 @@ export function ProjectRunsPage() {
                     ))}
                   </SelectContent>
                 </Select>
-              </div>
-              <div className="space-y-1">
-                <Label>Run Type</Label>
-                <Select value={runType} onValueChange={(value: RunType) => setRunType(value)}>
-                  <SelectTrigger>
+              </Field>
+
+              <Field id="run-type" label="Run Type" required>
+                <Select
+                  value={runType}
+                  onValueChange={(value: RunType) => {
+                    setRunType(value);
+                    if (value === "planning") {
+                      setSpecBundleId("");
+                    }
+                  }}
+                >
+                  <SelectTrigger id="run-type" aria-label="Run type" name="runType">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
@@ -284,89 +329,127 @@ export function ProjectRunsPage() {
                     <SelectItem value="implementation">implementation</SelectItem>
                   </SelectContent>
                 </Select>
+              </Field>
+
+              <div className="grid gap-3 md:grid-cols-2">
+                <Field id="run-provider" label="Provider" required>
+                  <Select
+                    value={provider}
+                    onValueChange={(value) => {
+                      setProvider(value);
+                      setModelId("");
+                    }}
+                  >
+                    <SelectTrigger id="run-provider" aria-label="Provider" name="provider">
+                      <SelectValue placeholder="Select provider" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {(providersQuery.data ?? []).map((item) => (
+                        <SelectItem key={item} value={item}>
+                          {item}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </Field>
+
+                <Field id="run-model" label="Model" required>
+                  <Select value={modelId.length > 0 ? modelId : undefined} onValueChange={setModelId}>
+                    <SelectTrigger id="run-model" aria-label="Model" name="modelId">
+                      <SelectValue placeholder="Select model" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {(modelsQuery.data ?? []).map((model) => (
+                        <SelectItem key={model.id} value={model.id}>
+                          {model.id}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </Field>
               </div>
-              <div className="space-y-1">
-                <Label>Provider</Label>
-                <Select
-                  value={provider}
-                  onValueChange={(value) => {
-                    setProvider(value);
-                    setModelId("");
-                  }}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select provider" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {(providersQuery.data ?? []).map((item) => (
-                      <SelectItem key={item} value={item}>
-                        {item}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-1">
-                <Label>Model</Label>
-                <Select value={modelId.length > 0 ? modelId : undefined} onValueChange={setModelId}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select model" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {(modelsQuery.data ?? []).map((model) => (
-                      <SelectItem key={model.id} value={model.id}>
-                        {model.id}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-1">
-                <Label>Reasoning Level</Label>
+
+              <Field id="run-reasoning-level" label="Reasoning Level">
                 <Select value={reasoningLevel} onValueChange={setReasoningLevel}>
-                  <SelectTrigger>
+                  <SelectTrigger id="run-reasoning-level" aria-label="Reasoning level" name="reasoningLevel">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    {[
-                      "minimal",
-                      "low",
-                      "medium",
-                      "high",
-                      "xhigh"
-                    ].map((item) => (
+                    {REASONING_LEVELS.map((item) => (
                       <SelectItem key={item} value={item}>
                         {item}
                       </SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
+              </Field>
+
+              <div className="grid gap-3 md:grid-cols-2">
+                <Field id="run-source-branch" label="Source Branch" required>
+                  <Input
+                    id="run-source-branch"
+                    name="sourceBranch"
+                    value={sourceBranch}
+                    onChange={(event) => setSourceBranch(event.target.value)}
+                    required
+                  />
+                </Field>
+
+                <Field id="run-target-branch" label="Target Branch" required>
+                  <Input
+                    id="run-target-branch"
+                    name="targetBranch"
+                    value={targetBranch}
+                    onChange={(event) => setTargetBranch(event.target.value)}
+                    required
+                  />
+                </Field>
               </div>
-              <div className="space-y-1">
-                <Label>Source Branch</Label>
-                <Input value={sourceBranch} onChange={(event) => setSourceBranch(event.target.value)} />
-              </div>
-              <div className="space-y-1">
-                <Label>Target Branch</Label>
-                <Input value={targetBranch} onChange={(event) => setTargetBranch(event.target.value)} />
-              </div>
+
               {runType === "implementation" ? (
-                <div className="space-y-1">
-                  <Label>Spec Bundle ID</Label>
-                  <Input value={specBundleId} onChange={(event) => setSpecBundleId(event.target.value)} />
-                </div>
+                <Field
+                  id="run-spec-bundle"
+                  label="Spec Bundle ID"
+                  required
+                  hint="Use a planning run output bundle ID."
+                >
+                  <Input
+                    id="run-spec-bundle"
+                    name="specBundleId"
+                    value={specBundleId}
+                    onChange={(event) => setSpecBundleId(event.target.value)}
+                    required
+                  />
+                </Field>
               ) : null}
-              <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-1">
-                  <Label>Temperature</Label>
-                  <Input value={temperature} onChange={(event) => setTemperature(event.target.value)} />
-                </div>
-                <div className="space-y-1">
-                  <Label>Max Tokens</Label>
-                  <Input value={maxTokens} onChange={(event) => setMaxTokens(event.target.value)} placeholder="optional" />
-                </div>
+
+              <div className="grid gap-3 md:grid-cols-2">
+                <Field id="run-temperature" label="Temperature">
+                  <Input
+                    id="run-temperature"
+                    name="temperature"
+                    value={temperature}
+                    onChange={(event) => setTemperature(event.target.value)}
+                  />
+                </Field>
+
+                <Field id="run-max-tokens" label="Max Tokens" hint="Optional">
+                  <Input
+                    id="run-max-tokens"
+                    name="maxTokens"
+                    value={maxTokens}
+                    onChange={(event) => setMaxTokens(event.target.value)}
+                  />
+                </Field>
               </div>
-              <Button type="submit" disabled={createRunMutation.isPending}>
+
+              {selectedAttractor ? (
+                <p className="text-xs text-muted-foreground">
+                  Selected attractor path: <span className="mono">{selectedAttractor.repoPath}</span>
+                </p>
+              ) : null}
+
+              <Button type="submit" disabled={createRunMutation.isPending} className="w-full">
                 {createRunMutation.isPending ? "Queueing..." : "Queue Run"}
               </Button>
             </form>

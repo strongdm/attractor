@@ -4,24 +4,23 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 
 import { buildApiUrl, cancelRun, getRun, getRunArtifacts } from "../lib/api";
-import type { RunEvent } from "../lib/types";
+import type { PageState, RunEvent } from "../lib/types";
+import { DataStatePanel } from "../components/common/data-state-panel";
+import { SectionHeader } from "../components/common/section-header";
+import { StatusPill } from "../components/common/status-pill";
 import { PageTitle } from "../components/layout/page-title";
 import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../components/ui/table";
 
-function statusVariant(status: string): "success" | "secondary" | "destructive" | "warning" {
-  if (status === "SUCCEEDED") {
-    return "success";
+const TERMINAL_STATUSES = ["SUCCEEDED", "FAILED", "CANCELED", "TIMEOUT"];
+
+function formatDate(value: string | null): string {
+  if (!value) {
+    return "-";
   }
-  if (status === "FAILED") {
-    return "destructive";
-  }
-  if (status === "RUNNING") {
-    return "warning";
-  }
-  return "secondary";
+  return new Date(value).toLocaleString();
 }
 
 export function RunDetailPage() {
@@ -62,6 +61,7 @@ export function RunDetailPage() {
     if (!runId) {
       return;
     }
+
     const source = new EventSource(buildApiUrl(`/api/runs/${runId}/events`));
 
     source.onmessage = (event) => {
@@ -74,7 +74,7 @@ export function RunDetailPage() {
           return [...previous, parsed];
         });
       } catch {
-        // ignored for heartbeat and malformed events
+        // ignore malformed/heartbeat events
       }
     };
 
@@ -98,11 +98,42 @@ export function RunDetailPage() {
     return [...byId.values()].sort((a, b) => new Date(a.ts).getTime() - new Date(b.ts).getTime());
   }, [runQuery.data?.events, streamEvents]);
 
-  if (!runQuery.data) {
-    return <p className="text-sm text-muted-foreground">Loading run...</p>;
+  const pageState: PageState = runQuery.isLoading
+    ? "loading"
+    : runQuery.isError
+    ? "error"
+    : runQuery.data
+    ? "ready"
+    : "empty";
+
+  if (pageState !== "ready" || !runQuery.data) {
+    return (
+      <DataStatePanel
+        state={pageState}
+        title={runQuery.isError ? "Failed to load run" : pageState === "loading" ? "Loading run" : "Run not found"}
+        message={
+          runQuery.isError
+            ? runQuery.error instanceof Error
+              ? runQuery.error.message
+              : "Unknown error"
+            : pageState === "loading"
+            ? "Fetching run status and events..."
+            : "The requested run does not exist."
+        }
+        onRetry={runQuery.isError ? () => void runQuery.refetch() : undefined}
+      />
+    );
   }
 
   const run = runQuery.data;
+  const artifacts = artifactsQuery.data?.artifacts ?? [];
+  const artifactsState: PageState = artifactsQuery.isLoading
+    ? "loading"
+    : artifactsQuery.isError
+    ? "error"
+    : artifacts.length > 0
+    ? "ready"
+    : "empty";
 
   return (
     <div>
@@ -111,13 +142,13 @@ export function RunDetailPage() {
         description={`${run.runType} on ${run.targetBranch}`}
         actions={
           <>
-            <Badge variant={statusVariant(run.status)}>{run.status}</Badge>
+            <StatusPill status={run.status} />
             <Button
               variant="outline"
               onClick={() => {
                 cancelMutation.mutate();
               }}
-              disabled={cancelMutation.isPending || ["SUCCEEDED", "FAILED", "CANCELED", "TIMEOUT"].includes(run.status)}
+              disabled={cancelMutation.isPending || TERMINAL_STATUSES.includes(run.status)}
             >
               Cancel Run
             </Button>
@@ -149,7 +180,7 @@ export function RunDetailPage() {
         <div className="grid gap-4 md:grid-cols-2">
           <Card>
             <CardHeader>
-              <CardTitle>Run Metadata</CardTitle>
+              <SectionHeader title="Run Metadata" description="Execution inputs and output references." />
             </CardHeader>
             <CardContent className="space-y-2 text-sm">
               <p>
@@ -176,21 +207,20 @@ export function RunDetailPage() {
               </p>
             </CardContent>
           </Card>
+
           <Card>
             <CardHeader>
-              <CardTitle>Timeline</CardTitle>
+              <SectionHeader title="Timeline" description="Lifecycle and terminal state details." />
             </CardHeader>
             <CardContent className="space-y-2 text-sm">
               <p>
-                <span className="text-muted-foreground">Created:</span> {new Date(run.createdAt).toLocaleString()}
+                <span className="text-muted-foreground">Created:</span> {formatDate(run.createdAt)}
               </p>
               <p>
-                <span className="text-muted-foreground">Started:</span>{" "}
-                {run.startedAt ? new Date(run.startedAt).toLocaleString() : "-"}
+                <span className="text-muted-foreground">Started:</span> {formatDate(run.startedAt)}
               </p>
               <p>
-                <span className="text-muted-foreground">Finished:</span>{" "}
-                {run.finishedAt ? new Date(run.finishedAt).toLocaleString() : "-"}
+                <span className="text-muted-foreground">Finished:</span> {formatDate(run.finishedAt)}
               </p>
               {run.error ? (
                 <p>
@@ -205,17 +235,28 @@ export function RunDetailPage() {
       {tab === "events" ? (
         <Card>
           <CardHeader>
-            <CardTitle>Live Event Stream</CardTitle>
-            <CardDescription>SSE is merged with persisted run events for continuity.</CardDescription>
+            <SectionHeader
+              title="Live Event Stream"
+              description="Server-sent events merged with persisted records for continuity."
+              actions={<Badge variant="secondary">{mergedEvents.length} events</Badge>}
+            />
           </CardHeader>
           <CardContent>
-            <div className="max-h-[60vh] overflow-auto rounded-md border border-border bg-background p-3">
-              <pre className="text-xs">
-                {mergedEvents
-                  .map((event) => `${event.ts} ${event.type} ${JSON.stringify(event.payload)}`)
-                  .join("\n")}
-              </pre>
-            </div>
+            <DataStatePanel
+              state={mergedEvents.length > 0 ? "ready" : "empty"}
+              title="No events yet"
+              message="Events appear here as the runner progresses through attractor nodes."
+            />
+
+            {mergedEvents.length > 0 ? (
+              <div className="max-h-[60vh] overflow-auto rounded-md border border-border bg-background p-3">
+                <pre className="text-xs leading-5">
+                  {mergedEvents
+                    .map((event) => `${event.ts} ${event.type} ${JSON.stringify(event.payload)}`)
+                    .join("\n")}
+                </pre>
+              </div>
+            ) : null}
           </CardContent>
         </Card>
       ) : null}
@@ -223,34 +264,71 @@ export function RunDetailPage() {
       {tab === "artifacts" ? (
         <Card>
           <CardHeader>
-            <CardTitle>Artifacts</CardTitle>
-            <CardDescription>Open artifacts in the embedded editor route.</CardDescription>
+            <SectionHeader
+              title="Artifacts"
+              description="Open text artifacts in the embedded editor page."
+              actions={<Badge variant="secondary">{artifacts.length} files</Badge>}
+            />
           </CardHeader>
-          <CardContent>
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Key</TableHead>
-                  <TableHead>Path</TableHead>
-                  <TableHead>Size</TableHead>
-                  <TableHead>Open</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {(artifactsQuery.data?.artifacts ?? []).map((artifact) => (
-                  <TableRow key={artifact.id}>
-                    <TableCell>{artifact.key}</TableCell>
-                    <TableCell className="mono text-xs">{artifact.path}</TableCell>
-                    <TableCell>{artifact.sizeBytes ? `${artifact.sizeBytes.toLocaleString()} B` : "-"}</TableCell>
-                    <TableCell>
-                      <Button asChild size="sm" variant="outline">
-                        <Link to={`/runs/${run.id}/artifacts/${artifact.id}`}>View</Link>
+          <CardContent className="space-y-3">
+            <DataStatePanel
+              state={artifactsState}
+              title={artifactsQuery.isError ? "Failed to load artifacts" : "No artifacts"}
+              message={
+                artifactsQuery.isError
+                  ? artifactsQuery.error instanceof Error
+                    ? artifactsQuery.error.message
+                    : "Unknown error"
+                  : "Artifacts are persisted as the run executes."
+              }
+              onRetry={artifactsQuery.isError ? () => void artifactsQuery.refetch() : undefined}
+            />
+
+            {artifacts.length > 0 ? (
+              <>
+                <div className="hidden md:block">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Key</TableHead>
+                        <TableHead>Path</TableHead>
+                        <TableHead>Size</TableHead>
+                        <TableHead className="w-[100px]">Open</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {artifacts.map((artifact) => (
+                        <TableRow key={artifact.id}>
+                          <TableCell>{artifact.key}</TableCell>
+                          <TableCell className="mono text-xs">{artifact.path}</TableCell>
+                          <TableCell>{artifact.sizeBytes ? `${artifact.sizeBytes.toLocaleString()} B` : "-"}</TableCell>
+                          <TableCell>
+                            <Button asChild size="sm" variant="outline">
+                              <Link to={`/runs/${run.id}/artifacts/${artifact.id}`}>View</Link>
+                            </Button>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
+
+                <div className="grid gap-2 md:hidden">
+                  {artifacts.map((artifact) => (
+                    <div key={artifact.id} className="rounded-lg border border-border bg-background p-3">
+                      <p className="font-medium">{artifact.key}</p>
+                      <p className="mono mt-1 text-xs text-muted-foreground">{artifact.path}</p>
+                      <p className="mt-2 text-sm text-muted-foreground">
+                        {artifact.sizeBytes ? `${artifact.sizeBytes.toLocaleString()} B` : "Unknown size"}
+                      </p>
+                      <Button asChild variant="outline" size="sm" className="mt-3 w-full">
+                        <Link to={`/runs/${run.id}/artifacts/${artifact.id}`}>View Artifact</Link>
                       </Button>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
+                    </div>
+                  ))}
+                </div>
+              </>
+            ) : null}
           </CardContent>
         </Card>
       ) : null}

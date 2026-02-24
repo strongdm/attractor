@@ -1,11 +1,13 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { Link, NavLink, Outlet, useLocation, useNavigate, useParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
+import { Menu, X } from "lucide-react";
 
 import { getRun, listProjects } from "../../lib/api";
 import { pathForProjectSelection } from "../../lib/project-routing";
 import { cn } from "../../lib/utils";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../ui/select";
+import { Button } from "../ui/button";
+import { ProjectContextSwitcher } from "./project-context-switcher";
 
 const primaryNav = [
   { to: "/", label: "Dashboard" },
@@ -20,17 +22,26 @@ function toTitleCase(value: string): string {
     .join(" ");
 }
 
+function trimLabel(input: string): string {
+  if (input.length <= 28) {
+    return input;
+  }
+  return `${input.slice(0, 25)}...`;
+}
+
 export function AppShell() {
   const location = useLocation();
   const navigate = useNavigate();
   const params = useParams<{ projectId?: string; runId?: string }>();
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const projectIdFromPath = params.projectId;
   const runIdFromPath = params.runId;
 
   const projectsQuery = useQuery({
     queryKey: ["projects"],
-    queryFn: listProjects
+    queryFn: () => listProjects({ limit: 200 })
   });
+
   const runContextQuery = useQuery({
     queryKey: ["run-context", runIdFromPath],
     queryFn: () => getRun(runIdFromPath ?? ""),
@@ -54,7 +65,7 @@ export function AppShell() {
         const projectId = parts[index + 1] ?? "";
         const project = projectsQuery.data?.find((candidate) => candidate.id === projectId);
         items.push({ href: "/projects", label: "Projects" });
-        items.push({ href: `/projects/${projectId}`, label: project?.name ?? "Project" });
+        items.push({ href: `/projects/${projectId}`, label: trimLabel(project?.name ?? "Project") });
         index += 1;
         cursor += `/${projectId}`;
         continue;
@@ -68,7 +79,7 @@ export function AppShell() {
           : undefined;
         if (runProjectId) {
           items.push({ href: "/projects", label: "Projects" });
-          items.push({ href: `/projects/${runProjectId}`, label: runProject?.name ?? "Project" });
+          items.push({ href: `/projects/${runProjectId}`, label: trimLabel(runProject?.name ?? "Project") });
           items.push({ href: `/projects/${runProjectId}/runs`, label: "Runs" });
         } else {
           items.push({ href: "/projects", label: "Runs" });
@@ -109,20 +120,45 @@ export function AppShell() {
 
   return (
     <div className="flex min-h-screen flex-col md:flex-row">
-      <aside className="border-b border-border bg-card/90 p-4 backdrop-blur md:min-h-screen md:w-64 md:border-b-0 md:border-r">
-        <div className="mb-6">
+      <div className="flex items-center justify-between border-b border-border/80 bg-card/90 px-4 py-3 backdrop-blur md:hidden">
+        <div>
+          <p className="text-xs uppercase tracking-[0.22em] text-muted-foreground">Attractor</p>
+          <p className="text-lg font-semibold leading-tight">Factory</p>
+        </div>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          aria-label={mobileNavOpen ? "Close navigation" : "Open navigation"}
+          onClick={() => setMobileNavOpen((open) => !open)}
+        >
+          {mobileNavOpen ? <X className="h-4 w-4" /> : <Menu className="h-4 w-4" />}
+        </Button>
+      </div>
+
+      <aside
+        className={cn(
+          "border-b border-border/80 bg-card/90 p-4 backdrop-blur md:min-h-screen md:w-72 md:border-b-0 md:border-r",
+          mobileNavOpen ? "block" : "hidden md:block"
+        )}
+      >
+        <div className="mb-6 hidden md:block">
           <p className="text-xs uppercase tracking-[0.22em] text-muted-foreground">Attractor</p>
           <h1 className="text-xl font-semibold">Factory</h1>
         </div>
+
         <nav className="space-y-1">
           {primaryNav.map((item) => (
             <NavLink
               key={item.to}
               to={item.to}
+              onClick={() => setMobileNavOpen(false)}
               className={({ isActive }) =>
                 cn(
-                  "block rounded-md px-3 py-2 text-sm",
-                  isActive ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-muted"
+                  "block rounded-md px-3 py-2.5 text-sm font-medium transition-colors",
+                  isActive
+                    ? "bg-primary text-primary-foreground"
+                    : "text-muted-foreground hover:bg-muted hover:text-foreground"
                 )
               }
               end={item.to === "/"}
@@ -130,6 +166,7 @@ export function AppShell() {
               {item.label}
             </NavLink>
           ))}
+
           {selectedProjectId ? (
             <div className="mt-4 space-y-1 border-t border-border pt-4">
               {[
@@ -141,10 +178,13 @@ export function AppShell() {
                 <NavLink
                   key={item.to}
                   to={item.to}
+                  onClick={() => setMobileNavOpen(false)}
                   className={({ isActive }) =>
                     cn(
-                      "block rounded-md px-3 py-2 text-sm",
-                      isActive ? "bg-secondary text-secondary-foreground" : "text-muted-foreground hover:bg-muted"
+                      "block rounded-md px-3 py-2 text-sm transition-colors",
+                      isActive
+                        ? "bg-secondary text-secondary-foreground"
+                        : "text-muted-foreground hover:bg-muted hover:text-foreground"
                     )
                   }
                 >
@@ -157,50 +197,38 @@ export function AppShell() {
       </aside>
 
       <div className="flex-1">
-        <header className="flex flex-col gap-3 border-b border-border bg-card/75 px-5 py-4 backdrop-blur md:flex-row md:items-center md:justify-between">
-          <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
-            {breadcrumbs.map((crumb, index) => {
-              const isLast = index === breadcrumbs.length - 1;
-              return (
-                <div key={crumb.href} className="flex items-center gap-2">
-                  {index > 0 ? <span>/</span> : null}
-                  {isLast ? (
-                    <span className="font-medium text-foreground">{crumb.label}</span>
-                  ) : (
-                    <Link to={crumb.href} className="hover:text-foreground">
-                      {crumb.label}
-                    </Link>
-                  )}
-                </div>
-              );
-            })}
-          </div>
+        <header className="border-b border-border/80 bg-card/80 px-4 py-3 backdrop-blur md:px-6 md:py-4">
+          <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+            <nav aria-label="Breadcrumb" className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
+              {breadcrumbs.map((crumb, index) => {
+                const isLast = index === breadcrumbs.length - 1;
+                return (
+                  <div key={`${crumb.href}-${index}`} className="flex items-center gap-2">
+                    {index > 0 ? <span aria-hidden="true">/</span> : null}
+                    {isLast ? (
+                      <span className="font-medium text-foreground">{crumb.label}</span>
+                    ) : (
+                      <Link to={crumb.href} className="hover:text-foreground">
+                        {crumb.label}
+                      </Link>
+                    )}
+                  </div>
+                );
+              })}
+            </nav>
 
-          <div className="flex w-full items-center gap-2 md:w-auto">
-            <Select
-              value={selectedProjectId ?? ""}
+            <ProjectContextSwitcher
+              projects={projectsQuery.data ?? []}
+              value={selectedProjectId}
+              disabled={projectsQuery.isLoading || (projectsQuery.data?.length ?? 0) === 0}
               onValueChange={(value) => {
-                if (!value) {
-                  return;
-                }
                 navigate(pathForProjectSelection(location.pathname, value));
               }}
-            >
-              <SelectTrigger className="md:w-72">
-                <SelectValue placeholder="Select project" />
-              </SelectTrigger>
-              <SelectContent>
-                {(projectsQuery.data ?? []).map((project) => (
-                  <SelectItem key={project.id} value={project.id}>
-                    {project.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            />
           </div>
         </header>
 
-        <main className="p-5 md:p-7">
+        <main className="p-4 md:p-6 lg:p-7">
           <Outlet />
         </main>
       </div>

@@ -5,6 +5,8 @@ import { toast } from "sonner";
 
 import { artifactDownloadUrl, getArtifactContent } from "../lib/api";
 import { monacoLanguageForArtifact } from "../lib/artifact-language";
+import type { PageState } from "../lib/types";
+import { DataStatePanel } from "../components/common/data-state-panel";
 import { PageTitle } from "../components/layout/page-title";
 import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
@@ -26,18 +28,36 @@ export function ArtifactViewerPage() {
     enabled: runId.length > 0 && artifactId.length > 0
   });
 
-  if (artifactQuery.isLoading) {
-    return <p className="text-sm text-muted-foreground">Loading artifact...</p>;
-  }
+  const state: PageState = artifactQuery.isLoading
+    ? "loading"
+    : artifactQuery.isError
+    ? "error"
+    : artifactQuery.data
+    ? "ready"
+    : "empty";
 
-  if (artifactQuery.error || !artifactQuery.data) {
-    return <p className="text-sm text-destructive">Failed to load artifact content.</p>;
+  if (state !== "ready" || !artifactQuery.data) {
+    return (
+      <DataStatePanel
+        state={state}
+        title={artifactQuery.isError ? "Failed to load artifact" : state === "loading" ? "Loading artifact" : "Artifact not found"}
+        message={
+          artifactQuery.isError
+            ? artifactQuery.error instanceof Error
+              ? artifactQuery.error.message
+              : "Unknown error"
+            : state === "loading"
+            ? "Fetching artifact content preview..."
+            : "Artifact does not exist for this run."
+        }
+        onRetry={artifactQuery.isError ? () => void artifactQuery.refetch() : undefined}
+      />
+    );
   }
 
   const payload = artifactQuery.data;
   const language = monacoLanguageForArtifact(payload.artifact.key);
   const downloadHref = artifactDownloadUrl(runId, artifactId);
-
   const isBinary = payload.content === null;
 
   return (
@@ -70,22 +90,28 @@ export function ArtifactViewerPage() {
         }
       />
 
-      <div className="mb-4 flex flex-wrap gap-2">
-        <Badge variant="secondary">{payload.artifact.contentType ?? "unknown type"}</Badge>
-        <Badge variant="secondary">{payload.bytesRead.toLocaleString()} bytes loaded</Badge>
-        {payload.artifact.sizeBytes ? (
-          <Badge variant="secondary">{payload.artifact.sizeBytes.toLocaleString()} bytes total</Badge>
-        ) : null}
-        {payload.truncated ? <Badge variant="warning">Preview Truncated</Badge> : null}
-        {isBinary ? <Badge variant="warning">Binary Artifact</Badge> : null}
-      </div>
+      <Card className="mb-4">
+        <CardHeader>
+          <CardTitle>Artifact Metadata</CardTitle>
+          <CardDescription>Preview limit and format details for this object.</CardDescription>
+        </CardHeader>
+        <CardContent className="flex flex-wrap gap-2">
+          <Badge variant="secondary">{payload.artifact.contentType ?? "unknown type"}</Badge>
+          <Badge variant="secondary">{payload.bytesRead.toLocaleString()} bytes loaded</Badge>
+          {payload.artifact.sizeBytes ? (
+            <Badge variant="secondary">{payload.artifact.sizeBytes.toLocaleString()} bytes total</Badge>
+          ) : null}
+          {payload.truncated ? <Badge variant="warning">Preview Truncated</Badge> : null}
+          {isBinary ? <Badge variant="warning">Binary Artifact</Badge> : null}
+        </CardContent>
+      </Card>
 
       {payload.truncated ? (
         <Card className="mb-4 border-warning/40">
           <CardHeader>
             <CardTitle>Preview limit reached</CardTitle>
             <CardDescription>
-              Only the first bytes were loaded for inline preview. Use download to inspect the full artifact.
+              Inline preview is capped for performance. Download the artifact for the full content.
             </CardDescription>
           </CardHeader>
         </Card>
@@ -95,7 +121,7 @@ export function ArtifactViewerPage() {
         <Card>
           <CardHeader>
             <CardTitle>No inline preview</CardTitle>
-            <CardDescription>This artifact is treated as binary. Download to inspect it locally.</CardDescription>
+            <CardDescription>This artifact is treated as binary and is only available as a download.</CardDescription>
           </CardHeader>
           <CardContent>
             <Button asChild>
@@ -108,7 +134,7 @@ export function ArtifactViewerPage() {
           <CardContent className="p-0">
             <Suspense fallback={<div className="p-4 text-sm text-muted-foreground">Loading editor...</div>}>
               <MonacoEditor
-                height="72vh"
+                height="68vh"
                 value={payload.content ?? ""}
                 language={language}
                 theme="vs-light"
@@ -118,7 +144,8 @@ export function ArtifactViewerPage() {
                   lineNumbers: "on",
                   scrollBeyondLastLine: false,
                   fontSize: 13,
-                  wordWrap: "on"
+                  wordWrap: "on",
+                  smoothScrolling: true
                 }}
               />
             </Suspense>

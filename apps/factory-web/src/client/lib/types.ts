@@ -1,5 +1,15 @@
 export type RunType = "planning" | "implementation";
 export type RunStatus = "QUEUED" | "RUNNING" | "SUCCEEDED" | "FAILED" | "CANCELED" | "TIMEOUT";
+export type PageState = "loading" | "empty" | "error" | "ready";
+
+export interface FilterState {
+  status?: RunStatus | "all";
+  runType?: RunType | "all";
+  branch?: string;
+  query?: string;
+  limit?: number;
+  cursor?: string;
+}
 
 export interface Project {
   id: string;
@@ -115,4 +125,9 @@ export interface ArtifactContentResponse {
   truncated: boolean;
   bytesRead: number;
   encoding: string | null;
+}
+
+export interface CursorPage<T> {
+  items: T[];
+  nextCursor: string | null;
 }

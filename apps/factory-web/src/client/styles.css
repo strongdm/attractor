@@ -5,30 +5,40 @@
 @tailwind utilities;
 
 :root {
-  --background: 148 36% 96%;
-  --foreground: 192 30% 12%;
+  --background: 160 18% 95%;
+  --foreground: 200 27% 14%;
   --card: 0 0% 100%;
-  --card-foreground: 192 30% 12%;
+  --card-foreground: 200 27% 14%;
   --popover: 0 0% 100%;
-  --popover-foreground: 192 30% 12%;
-  --primary: 181 64% 26%;
-  --primary-foreground: 180 100% 97%;
-  --secondary: 147 30% 90%;
-  --secondary-foreground: 183 44% 19%;
-  --muted: 146 20% 92%;
-  --muted-foreground: 186 16% 36%;
-  --accent: 32 85% 86%;
-  --accent-foreground: 24 60% 22%;
-  --destructive: 0 75% 52%;
+  --popover-foreground: 200 27% 14%;
+
+  --primary: 186 62% 23%;
+  --primary-foreground: 180 60% 97%;
+  --secondary: 154 25% 90%;
+  --secondary-foreground: 182 36% 22%;
+  --muted: 156 15% 90%;
+  --muted-foreground: 190 16% 36%;
+  --accent: 34 44% 82%;
+  --accent-foreground: 27 45% 23%;
+
+  --destructive: 0 66% 50%;
   --destructive-foreground: 0 0% 98%;
-  --success: 146 72% 38%;
-  --success-foreground: 0 0% 99%;
-  --warning: 33 95% 52%;
-  --warning-foreground: 24 55% 15%;
-  --border: 150 20% 82%;
-  --input: 150 20% 82%;
-  --ring: 181 64% 30%;
+  --success: 147 70% 34%;
+  --success-foreground: 0 0% 98%;
+  --warning: 36 89% 48%;
+  --warning-foreground: 26 45% 15%;
+
+  --border: 165 18% 74%;
+  --input: 165 17% 79%;
+  --ring: 185 58% 30%;
+
   --radius: 0.75rem;
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-6: 24px;
+  --space-8: 32px;
 }
 
 * {
@@ -39,9 +49,9 @@ body {
   margin: 0;
   min-height: 100vh;
   background:
-    radial-gradient(circle at 8% 3%, hsl(178 55% 94%) 0, transparent 32%),
-    radial-gradient(circle at 88% 5%, hsl(35 92% 91%) 0, transparent 28%),
-    linear-gradient(180deg, hsl(var(--background)) 0%, hsl(145 20% 94%) 100%);
+    radial-gradient(circle at 10% 0%, hsl(182 40% 93%) 0, transparent 30%),
+    radial-gradient(circle at 90% 5%, hsl(40 45% 90%) 0, transparent 26%),
+    linear-gradient(180deg, hsl(var(--background)) 0%, hsl(154 16% 92%) 100%);
   color: hsl(var(--foreground));
   font-family: "Space Grotesk", sans-serif;
 }
@@ -54,4 +64,17 @@ code,
 pre,
 .mono {
   font-family: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+}
+
+:focus-visible {
+  outline: 2px solid hsl(var(--ring));
+  outline-offset: 2px;
+}
+
+@media (max-width: 768px) {
+  body {
+    background:
+      radial-gradient(circle at 8% 0%, hsl(182 40% 93%) 0, transparent 26%),
+      linear-gradient(180deg, hsl(var(--background)) 0%, hsl(154 16% 92%) 100%);
+  }
 }

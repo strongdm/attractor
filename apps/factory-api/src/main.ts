@@ -45,6 +45,8 @@ const RUNNER_DEFAULT_IMAGE =
 const GLOBAL_SECRET_NAMESPACE =
   process.env.GLOBAL_SECRET_NAMESPACE ?? process.env.FACTORY_SYSTEM_NAMESPACE ?? "factory-system";
 const MINIO_BUCKET = process.env.MINIO_BUCKET ?? "factory-artifacts";
+const DEFAULT_LIST_LIMIT = 100;
+const MAX_LIST_LIMIT = 200;
 
 const minioClient = new S3Client({
   region: "us-east-1",
@@ -81,6 +83,28 @@ async function getArtifactByRun(runId: string, artifactId: string) {
       runId
     }
   });
+}
+
+function queryValue(value: unknown): string | undefined {
+  if (typeof value === "string") {
+    return value;
+  }
+  if (Array.isArray(value) && typeof value[0] === "string") {
+    return value[0];
+  }
+  return undefined;
+}
+
+function listLimit(value: unknown): number {
+  const raw = queryValue(value);
+  if (!raw) {
+    return DEFAULT_LIST_LIMIT;
+  }
+  const parsed = Number.parseInt(raw, 10);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return DEFAULT_LIST_LIMIT;
+  }
+  return Math.min(parsed, MAX_LIST_LIMIT);
 }
 
 function hasProvider(provider: string): boolean {
@@ -335,9 +359,31 @@ app.post("/api/projects", async (req, res) => {
   res.status(201).json(project);
 });
 
-app.get("/api/projects", async (_req, res) => {
-  const projects = await prisma.project.findMany({ orderBy: { createdAt: "desc" } });
-  res.json({ projects });
+app.get("/api/projects", async (req, res) => {
+  const query = queryValue(req.query.query)?.trim();
+  const limit = listLimit(req.query.limit);
+  const cursor = queryValue(req.query.cursor);
+
+  const projects = await prisma.project.findMany({
+    where: query
+      ? {
+          OR: [
+            { name: { contains: query, mode: "insensitive" } },
+            { namespace: { contains: query, mode: "insensitive" } },
+            { repoFullName: { contains: query, mode: "insensitive" } }
+          ]
+        }
+      : undefined,
+    orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+    take: limit + 1,
+    ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {})
+  });
+
+  const nextCursor = projects.length > limit ? projects[limit]?.id ?? null : null;
+  res.json({
+    projects: projects.slice(0, limit),
+    nextCursor
+  });
 });
 
 const bootstrapSelfSchema = z.object({
@@ -597,12 +643,44 @@ app.get("/api/projects/:projectId/attractors", async (req, res) => {
 });
 
 app.get("/api/projects/:projectId/runs", async (req, res) => {
+  const limit = listLimit(req.query.limit);
+  const cursor = queryValue(req.query.cursor);
+  const status = queryValue(req.query.status);
+  const runType = queryValue(req.query.runType);
+  const branch = queryValue(req.query.branch)?.trim();
+
+  if (status && status !== "all" && !Object.values(RunStatus).includes(status as RunStatus)) {
+    return sendError(res, 400, `Unknown run status: ${status}`);
+  }
+
+  if (runType && runType !== "all" && !Object.values(RunType).includes(runType as RunType)) {
+    return sendError(res, 400, `Unknown run type: ${runType}`);
+  }
+
   const runs = await prisma.run.findMany({
-    where: { projectId: req.params.projectId },
-    orderBy: { createdAt: "desc" },
-    take: 100
+    where: {
+      projectId: req.params.projectId,
+      ...(status && status !== "all" ? { status: status as RunStatus } : {}),
+      ...(runType && runType !== "all" ? { runType: runType as RunType } : {}),
+      ...(branch
+        ? {
+            OR: [
+              { sourceBranch: { contains: branch, mode: "insensitive" } },
+              { targetBranch: { contains: branch, mode: "insensitive" } }
+            ]
+          }
+        : {})
+    },
+    orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+    take: limit + 1,
+    ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {})
   });
-  res.json({ runs });
+
+  const nextCursor = runs.length > limit ? runs[limit]?.id ?? null : null;
+  res.json({
+    runs: runs.slice(0, limit),
+    nextCursor
+  });
 });
 
 const createRunSchema = z.object({

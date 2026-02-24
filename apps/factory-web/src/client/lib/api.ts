@@ -2,6 +2,8 @@ import type {
   Artifact,
   ArtifactContentResponse,
   AttractorDef,
+  CursorPage,
+  FilterState,
   GlobalSecret,
   Project,
   ProjectSecret,
@@ -47,13 +49,47 @@ async function apiRequest<T>(path: string, init?: RequestInit): Promise<T> {
   return payload as T;
 }
 
+function withQuery(path: string, params: Record<string, string | number | undefined>): string {
+  const search = new URLSearchParams();
+  for (const [key, value] of Object.entries(params)) {
+    if (value === undefined || value === "") {
+      continue;
+    }
+    search.set(key, String(value));
+  }
+  const suffix = search.toString();
+  return suffix ? `${path}?${suffix}` : path;
+}
+
 export function artifactDownloadUrl(runId: string, artifactId: string): string {
   return buildApiUrl(`/api/runs/${runId}/artifacts/${artifactId}/download`);
 }
 
-export async function listProjects(): Promise<Project[]> {
-  const payload = await apiRequest<{ projects: Project[] }>("/api/projects");
+export async function listProjects(filters?: Pick<FilterState, "query" | "limit" | "cursor">): Promise<Project[]> {
+  const payload = await apiRequest<{ projects: Project[]; nextCursor?: string | null }>(
+    withQuery("/api/projects", {
+      query: filters?.query,
+      limit: filters?.limit,
+      cursor: filters?.cursor
+    })
+  );
   return payload.projects;
+}
+
+export async function listProjectsPage(
+  filters?: Pick<FilterState, "query" | "limit" | "cursor">
+): Promise<CursorPage<Project>> {
+  const payload = await apiRequest<{ projects: Project[]; nextCursor?: string | null }>(
+    withQuery("/api/projects", {
+      query: filters?.query,
+      limit: filters?.limit,
+      cursor: filters?.cursor
+    })
+  );
+  return {
+    items: payload.projects,
+    nextCursor: payload.nextCursor ?? null
+  };
 }
 
 export async function connectProjectRepo(
@@ -160,9 +196,39 @@ export async function createAttractor(
   });
 }
 
-export async function listProjectRuns(projectId: string): Promise<Run[]> {
-  const payload = await apiRequest<{ runs: Run[] }>(`/api/projects/${projectId}/runs`);
+export async function listProjectRuns(
+  projectId: string,
+  filters?: Pick<FilterState, "status" | "runType" | "branch" | "limit" | "cursor">
+): Promise<Run[]> {
+  const payload = await apiRequest<{ runs: Run[]; nextCursor?: string | null }>(
+    withQuery(`/api/projects/${projectId}/runs`, {
+      status: filters?.status,
+      runType: filters?.runType,
+      branch: filters?.branch,
+      limit: filters?.limit,
+      cursor: filters?.cursor
+    })
+  );
   return payload.runs;
+}
+
+export async function listProjectRunsPage(
+  projectId: string,
+  filters?: Pick<FilterState, "status" | "runType" | "branch" | "limit" | "cursor">
+): Promise<CursorPage<Run>> {
+  const payload = await apiRequest<{ runs: Run[]; nextCursor?: string | null }>(
+    withQuery(`/api/projects/${projectId}/runs`, {
+      status: filters?.status,
+      runType: filters?.runType,
+      branch: filters?.branch,
+      limit: filters?.limit,
+      cursor: filters?.cursor
+    })
+  );
+  return {
+    items: payload.runs,
+    nextCursor: payload.nextCursor ?? null
+  };
 }
 
 export async function createRun(input: {

@@ -10,13 +10,15 @@ import {
   upsertGlobalSecret,
   upsertProjectSecret
 } from "../lib/api";
-import type { ProviderSchema } from "../lib/types";
+import type { PageState, ProviderSchema } from "../lib/types";
 import { PageTitle } from "../components/layout/page-title";
+import { DataStatePanel } from "../components/common/data-state-panel";
+import { SectionHeader } from "../components/common/section-header";
 import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../components/ui/card";
+import { Field } from "../components/ui/field";
 import { Input } from "../components/ui/input";
-import { Label } from "../components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../components/ui/table";
 
@@ -133,29 +135,64 @@ export function ProjectSecretsPage() {
     }
   });
 
+  const state: PageState = schemasQuery.isLoading
+    ? "loading"
+    : schemasQuery.isError
+    ? "error"
+    : "ready";
+  const projectSecretsState: PageState = projectSecretsQuery.isLoading
+    ? "loading"
+    : projectSecretsQuery.isError
+    ? "error"
+    : (projectSecretsQuery.data?.length ?? 0) > 0
+    ? "ready"
+    : "empty";
+  const globalSecretsState: PageState = globalSecretsQuery.isLoading
+    ? "loading"
+    : globalSecretsQuery.isError
+    ? "error"
+    : (globalSecretsQuery.data?.length ?? 0) > 0
+    ? "ready"
+    : "empty";
+
   return (
     <div>
       <PageTitle
         title="Secrets"
-        description="Global secrets apply to every project namespace. Project secrets override globals for the same provider."
+        description="Manage project and global credentials. Project-level secrets override global values for the same provider."
       />
 
-      <div className="mb-4 flex items-center gap-2">
+      <div className="mb-4 flex items-center gap-2 rounded-md border border-warning/40 bg-warning/10 px-3 py-2">
         <Badge variant="warning">Override Rule</Badge>
-        <p className="text-sm text-muted-foreground">
+        <p className="text-sm text-warning-foreground">
           If both global and project secret exist for one provider, run pods use the project-scoped secret.
         </p>
       </div>
 
+      <DataStatePanel
+        state={state}
+        title={schemasQuery.isError ? "Failed to load provider mappings" : "Loading provider mappings"}
+        message={
+          schemasQuery.isError
+            ? schemasQuery.error instanceof Error
+              ? schemasQuery.error.message
+              : "Unknown error"
+            : "Preparing provider key mapping forms..."
+        }
+        onRetry={schemasQuery.isError ? () => void schemasQuery.refetch() : undefined}
+      />
+
       <div className="grid gap-4 lg:grid-cols-2">
         <Card>
           <CardHeader>
-            <CardTitle>Project Secret</CardTitle>
-            <CardDescription>Stored in project namespace and used first for provider auth.</CardDescription>
+            <SectionHeader
+              title="Project Secret"
+              description="Stored in project namespace and used first for provider authentication."
+            />
           </CardHeader>
           <CardContent>
             <form
-              className="grid gap-3"
+              className="space-y-3"
               onSubmit={(event) => {
                 event.preventDefault();
                 if (!projectSecretValue.trim()) {
@@ -163,18 +200,23 @@ export function ProjectSecretsPage() {
                   return;
                 }
                 if (!projectName.trim() || !projectLogicalKey.trim() || !projectSecretKey.trim()) {
-                  toast.error("Project secret name, logical key, and key are required");
+                  toast.error("Project secret name, logical key, and secret key are required");
                   return;
                 }
                 projectMutation.mutate();
               }}
             >
-              <div className="space-y-1">
-                <Label>Secret Name</Label>
-                <Input value={projectName} onChange={(event) => setProjectName(event.target.value)} />
-              </div>
-              <div className="space-y-1">
-                <Label>Provider</Label>
+              <Field id="project-secret-name" label="Secret Name" required>
+                <Input
+                  id="project-secret-name"
+                  name="projectSecretName"
+                  value={projectName}
+                  onChange={(event) => setProjectName(event.target.value)}
+                  required
+                />
+              </Field>
+
+              <Field id="project-secret-provider" label="Provider" required>
                 <Select
                   value={projectProvider}
                   onValueChange={(provider) => {
@@ -186,7 +228,7 @@ export function ProjectSecretsPage() {
                     setProjectSecretKey(defaultSecretKey(schema, logicalKey));
                   }}
                 >
-                  <SelectTrigger>
+                  <SelectTrigger id="project-secret-provider" aria-label="Project secret provider" name="projectSecretProvider">
                     <SelectValue placeholder="Select provider" />
                   </SelectTrigger>
                   <SelectContent>
@@ -197,10 +239,10 @@ export function ProjectSecretsPage() {
                     ))}
                   </SelectContent>
                 </Select>
-              </div>
+              </Field>
+
               <div className="grid gap-3 md:grid-cols-2">
-                <div className="space-y-1">
-                  <Label>Logical Key</Label>
+                <Field id="project-logical-key" label="Logical Key" required>
                   <Select
                     value={projectLogicalKey}
                     onValueChange={(logicalKey) => {
@@ -208,7 +250,7 @@ export function ProjectSecretsPage() {
                       setProjectSecretKey(defaultSecretKey(currentProjectSchema, logicalKey));
                     }}
                   >
-                    <SelectTrigger>
+                    <SelectTrigger id="project-logical-key" aria-label="Project logical key" name="projectLogicalKey">
                       <SelectValue placeholder="Select key" />
                     </SelectTrigger>
                     <SelectContent>
@@ -219,21 +261,32 @@ export function ProjectSecretsPage() {
                       ))}
                     </SelectContent>
                   </Select>
-                </div>
-                <div className="space-y-1">
-                  <Label>Secret Key</Label>
-                  <Input value={projectSecretKey} onChange={(event) => setProjectSecretKey(event.target.value)} />
-                </div>
+                </Field>
+
+                <Field id="project-secret-key" label="Secret Key" required>
+                  <Input
+                    id="project-secret-key"
+                    name="projectSecretKey"
+                    value={projectSecretKey}
+                    onChange={(event) => setProjectSecretKey(event.target.value)}
+                    required
+                  />
+                </Field>
               </div>
-              <div className="space-y-1">
-                <Label>Secret Value</Label>
+
+              <Field id="project-secret-value" label="Secret Value" required>
                 <Input
+                  id="project-secret-value"
+                  name="projectSecretValue"
                   type="password"
                   value={projectSecretValue}
                   onChange={(event) => setProjectSecretValue(event.target.value)}
+                  autoComplete="off"
+                  required
                 />
-              </div>
-              <Button type="submit" disabled={projectMutation.isPending}>
+              </Field>
+
+              <Button type="submit" disabled={projectMutation.isPending} className="w-full">
                 {projectMutation.isPending ? "Saving..." : "Save Project Secret"}
               </Button>
             </form>
@@ -242,12 +295,14 @@ export function ProjectSecretsPage() {
 
         <Card>
           <CardHeader>
-            <CardTitle>Global Secret</CardTitle>
-            <CardDescription>Shared across all projects. Good for default provider credentials.</CardDescription>
+            <SectionHeader
+              title="Global Secret"
+              description="Shared defaults across all projects. Use project secret to override per project."
+            />
           </CardHeader>
           <CardContent>
             <form
-              className="grid gap-3"
+              className="space-y-3"
               onSubmit={(event) => {
                 event.preventDefault();
                 if (!globalSecretValue.trim()) {
@@ -255,18 +310,23 @@ export function ProjectSecretsPage() {
                   return;
                 }
                 if (!globalName.trim() || !globalLogicalKey.trim() || !globalSecretKey.trim()) {
-                  toast.error("Global secret name, logical key, and key are required");
+                  toast.error("Global secret name, logical key, and secret key are required");
                   return;
                 }
                 globalMutation.mutate();
               }}
             >
-              <div className="space-y-1">
-                <Label>Secret Name</Label>
-                <Input value={globalName} onChange={(event) => setGlobalName(event.target.value)} />
-              </div>
-              <div className="space-y-1">
-                <Label>Provider</Label>
+              <Field id="global-secret-name" label="Secret Name" required>
+                <Input
+                  id="global-secret-name"
+                  name="globalSecretName"
+                  value={globalName}
+                  onChange={(event) => setGlobalName(event.target.value)}
+                  required
+                />
+              </Field>
+
+              <Field id="global-secret-provider" label="Provider" required>
                 <Select
                   value={globalProvider}
                   onValueChange={(provider) => {
@@ -278,7 +338,7 @@ export function ProjectSecretsPage() {
                     setGlobalSecretKey(defaultSecretKey(schema, logicalKey));
                   }}
                 >
-                  <SelectTrigger>
+                  <SelectTrigger id="global-secret-provider" aria-label="Global secret provider" name="globalSecretProvider">
                     <SelectValue placeholder="Select provider" />
                   </SelectTrigger>
                   <SelectContent>
@@ -289,10 +349,10 @@ export function ProjectSecretsPage() {
                     ))}
                   </SelectContent>
                 </Select>
-              </div>
+              </Field>
+
               <div className="grid gap-3 md:grid-cols-2">
-                <div className="space-y-1">
-                  <Label>Logical Key</Label>
+                <Field id="global-logical-key" label="Logical Key" required>
                   <Select
                     value={globalLogicalKey}
                     onValueChange={(logicalKey) => {
@@ -300,7 +360,7 @@ export function ProjectSecretsPage() {
                       setGlobalSecretKey(defaultSecretKey(currentGlobalSchema, logicalKey));
                     }}
                   >
-                    <SelectTrigger>
+                    <SelectTrigger id="global-logical-key" aria-label="Global logical key" name="globalLogicalKey">
                       <SelectValue placeholder="Select key" />
                     </SelectTrigger>
                     <SelectContent>
@@ -311,21 +371,32 @@ export function ProjectSecretsPage() {
                       ))}
                     </SelectContent>
                   </Select>
-                </div>
-                <div className="space-y-1">
-                  <Label>Secret Key</Label>
-                  <Input value={globalSecretKey} onChange={(event) => setGlobalSecretKey(event.target.value)} />
-                </div>
+                </Field>
+
+                <Field id="global-secret-key" label="Secret Key" required>
+                  <Input
+                    id="global-secret-key"
+                    name="globalSecretKey"
+                    value={globalSecretKey}
+                    onChange={(event) => setGlobalSecretKey(event.target.value)}
+                    required
+                  />
+                </Field>
               </div>
-              <div className="space-y-1">
-                <Label>Secret Value</Label>
+
+              <Field id="global-secret-value" label="Secret Value" required>
                 <Input
+                  id="global-secret-value"
+                  name="globalSecretValue"
                   type="password"
                   value={globalSecretValue}
                   onChange={(event) => setGlobalSecretValue(event.target.value)}
+                  autoComplete="off"
+                  required
                 />
-              </div>
-              <Button type="submit" disabled={globalMutation.isPending}>
+              </Field>
+
+              <Button type="submit" disabled={globalMutation.isPending} className="w-full">
                 {globalMutation.isPending ? "Saving..." : "Save Global Secret"}
               </Button>
             </form>
@@ -339,24 +410,40 @@ export function ProjectSecretsPage() {
             <CardTitle>Project Secrets</CardTitle>
           </CardHeader>
           <CardContent>
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Name</TableHead>
-                  <TableHead>Provider</TableHead>
-                  <TableHead>K8s Secret</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {(projectSecretsQuery.data ?? []).map((secret) => (
-                  <TableRow key={secret.id}>
-                    <TableCell>{secret.name}</TableCell>
-                    <TableCell>{secret.provider}</TableCell>
-                    <TableCell className="mono text-xs">{secret.k8sSecretName}</TableCell>
+            <DataStatePanel
+              state={projectSecretsState}
+              title={
+                projectSecretsQuery.isError ? "Failed to load project secrets" : "No project secrets"
+              }
+              message={
+                projectSecretsQuery.isError
+                  ? projectSecretsQuery.error instanceof Error
+                    ? projectSecretsQuery.error.message
+                    : "Unknown error"
+                  : "Add a project secret to override global credentials."
+              }
+              onRetry={projectSecretsQuery.isError ? () => void projectSecretsQuery.refetch() : undefined}
+            />
+            {(projectSecretsQuery.data?.length ?? 0) > 0 ? (
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Name</TableHead>
+                    <TableHead>Provider</TableHead>
+                    <TableHead>K8s Secret</TableHead>
                   </TableRow>
-                ))}
-              </TableBody>
-            </Table>
+                </TableHeader>
+                <TableBody>
+                  {(projectSecretsQuery.data ?? []).map((secret) => (
+                    <TableRow key={secret.id}>
+                      <TableCell>{secret.name}</TableCell>
+                      <TableCell>{secret.provider}</TableCell>
+                      <TableCell className="mono text-xs">{secret.k8sSecretName}</TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            ) : null}
           </CardContent>
         </Card>
 
@@ -365,24 +452,38 @@ export function ProjectSecretsPage() {
             <CardTitle>Global Secrets</CardTitle>
           </CardHeader>
           <CardContent>
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Name</TableHead>
-                  <TableHead>Provider</TableHead>
-                  <TableHead>K8s Secret</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {(globalSecretsQuery.data ?? []).map((secret) => (
-                  <TableRow key={secret.id}>
-                    <TableCell>{secret.name}</TableCell>
-                    <TableCell>{secret.provider}</TableCell>
-                    <TableCell className="mono text-xs">{secret.k8sSecretName}</TableCell>
+            <DataStatePanel
+              state={globalSecretsState}
+              title={globalSecretsQuery.isError ? "Failed to load global secrets" : "No global secrets"}
+              message={
+                globalSecretsQuery.isError
+                  ? globalSecretsQuery.error instanceof Error
+                    ? globalSecretsQuery.error.message
+                    : "Unknown error"
+                  : "Create a global secret to share provider credentials across projects."
+              }
+              onRetry={globalSecretsQuery.isError ? () => void globalSecretsQuery.refetch() : undefined}
+            />
+            {(globalSecretsQuery.data?.length ?? 0) > 0 ? (
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Name</TableHead>
+                    <TableHead>Provider</TableHead>
+                    <TableHead>K8s Secret</TableHead>
                   </TableRow>
-                ))}
-              </TableBody>
-            </Table>
+                </TableHeader>
+                <TableBody>
+                  {(globalSecretsQuery.data ?? []).map((secret) => (
+                    <TableRow key={secret.id}>
+                      <TableCell>{secret.name}</TableCell>
+                      <TableCell>{secret.provider}</TableCell>
+                      <TableCell className="mono text-xs">{secret.k8sSecretName}</TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            ) : null}
           </CardContent>
         </Card>
       </div>
