@@ -1,0 +1,14 @@
+digraph EnvironmentsFeature {
+  graph [
+    goal="Add environment management that supports global and project scopes, with project overrides, and move global secrets/environments access into the project context dropdown UX."
+  ]
+
+  start [shape=Mdiamond, label="Start"]
+  plan [shape=box, label="Plan", prompt="Create an implementation-ready plan for an environments feature in Attractor Factory. Include data model, API contracts, UI/UX behavior, migration plan, and acceptance tests. Environments must support global and project scopes with clear precedence rules. Update secrets UX so global secrets are managed from the project context dropdown instead of side-by-side panels. Apply the same UX pattern for global environments."]
+  implement [shape=box, label="Implement", prompt="Implement the planned environments and global-in-dropdown UX changes across API, web app, and tests. Preserve existing behavior where not explicitly changed and include migration-safe defaults."]
+  done [shape=Msquare, label="Done"]
+
+  start -> plan
+  plan -> implement
+  implement -> done
+}
