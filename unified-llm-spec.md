@@ -646,6 +646,8 @@ Provider finish reason mapping:
 | Gemini    | RECITATION        | content_filter   |
 | Gemini    | (has tool calls)  | tool_calls       |
 
+Note: The OpenAI Responses API does not use these Chat Completions finish reasons directly. Instead, it uses a `status` field (`completed`, `incomplete`, `failed`) on the response object. The adapter should map `completed` to `stop`, `incomplete` to `length`, and `failed` to `error`. Tool call detection requires inspecting output items for `function_call` types rather than relying on a dedicated finish reason.
+
 Note: Gemini does not have a dedicated "tool_calls" finish reason. The adapter infers it from the presence of `functionCall` parts in the response.
 
 ### 3.9 Usage
@@ -674,10 +676,10 @@ Provider usage field mapping:
 
 | SDK Field           | OpenAI Field                                         | Anthropic Field                  | Gemini Field                          |
 |---------------------|------------------------------------------------------|----------------------------------|---------------------------------------|
-| input_tokens        | usage.prompt_tokens                                  | usage.input_tokens               | usageMetadata.promptTokenCount        |
-| output_tokens       | usage.completion_tokens                              | usage.output_tokens              | usageMetadata.candidatesTokenCount    |
-| reasoning_tokens    | usage.completion_tokens_details.reasoning_tokens     | (see note below)                 | usageMetadata.thoughtsTokenCount      |
-| cache_read_tokens   | usage.prompt_tokens_details.cached_tokens            | usage.cache_read_input_tokens    | usageMetadata.cachedContentTokenCount |
+| input_tokens        | usage.input_tokens                                   | usage.input_tokens               | usageMetadata.promptTokenCount        |
+| output_tokens       | usage.output_tokens                                  | usage.output_tokens              | usageMetadata.candidatesTokenCount    |
+| reasoning_tokens    | usage.output_tokens_details.reasoning_tokens         | (see note below)                 | usageMetadata.thoughtsTokenCount      |
+| cache_read_tokens   | usage.input_tokens_details.cached_tokens             | usage.cache_read_input_tokens    | usageMetadata.cachedContentTokenCount |
 | cache_write_tokens  | (not provided)                                       | usage.cache_creation_input_tokens| (not provided)                        |
 
 #### Reasoning Token Handling (Critical)
@@ -1139,7 +1141,7 @@ Provider mapping:
 | auto      | `"auto"`                                                | `{"type": "auto"}`                 | `"AUTO"`                                                   |
 | none      | `"none"`                                                | Omit tools from request            | `"NONE"`                                                   |
 | required  | `"required"`                                            | `{"type": "any"}`                  | `"ANY"`                                                    |
-| named     | `{"type":"function","function":{"name":"..."}}`        | `{"type":"tool","name":"..."}`     | `{"mode":"ANY","allowedFunctionNames":["..."]}`            |
+| named     | `{"type":"function","name":"..."}`                     | `{"type":"tool","name":"..."}`     | `{"mode":"ANY","allowedFunctionNames":["..."]}`            |
 
 Note on Anthropic `none` mode: Anthropic does not support `tool_choice: {"type": "none"}` when tools are present. The adapter must omit the tools array from the request body entirely.
 
@@ -1526,7 +1528,7 @@ ContentPart Translations:
   TEXT          -> { "type": "input_text", "text": "..." } (user) or { "type": "output_text", "text": "..." } (assistant)
   IMAGE (url)  -> { "type": "input_image", "image_url": "..." }
   IMAGE (data) -> { "type": "input_image", "image_url": "data:<mime>;base64,<data>" }
-  TOOL_CALL    -> input item: { "type": "function_call", "id": "...", "name": "...", "arguments": "..." }
+  TOOL_CALL    -> input item: { "type": "function_call", "call_id": "...", "name": "...", "arguments": "..." }
   TOOL_RESULT  -> input item: { "type": "function_call_output", "call_id": "...", "output": "..." }
 ```
 
@@ -1593,7 +1595,7 @@ Special behaviors:
 | Tool.name               | tools[].function.name                              | tools[].name                                     | tools[].functionDeclarations[].name                |
 | Tool.description        | tools[].function.description                       | tools[].description                              | tools[].functionDeclarations[].description         |
 | Tool.parameters         | tools[].function.parameters                        | tools[].input_schema                             | tools[].functionDeclarations[].parameters          |
-| Wrapper structure       | `{"type":"function","function":{...}}`             | `{"name":...,"description":...,"input_schema":...}` | `{"functionDeclarations":[{...}]}`             |
+| Wrapper structure       | `{"type":"function","name":"...","description":"...","parameters":{...}}` | `{"name":...,"description":...,"input_schema":...}` | `{"functionDeclarations":[{...}]}`             |
 
 ### 7.5 Response Translation
 
@@ -1737,18 +1739,18 @@ A summary of provider-specific behaviors that adapters must handle:
 | Message alternation          | No strict requirement            | Strict user/assistant alternation      | No strict requirement               |
 | Reasoning tokens             | Via `output_tokens_details`; requires Responses API | Via thinking blocks (text visible) | Via `thoughtsTokenCount`          |
 | Tool call IDs                | Provider-assigned unique IDs     | Provider-assigned unique IDs           | No unique IDs (use function name)   |
-| Tool result format           | Separate `tool` role messages    | `tool_result` blocks in user messages  | `functionResponse` in user content  |
+| Tool result format           | `function_call_output` input items | `tool_result` blocks in user messages  | `functionResponse` in user content  |
 | Tool choice "none"           | `"none"`                         | Omit tools from request entirely       | `"NONE"`                            |
 | max_tokens                   | Optional                         | Required (default to 4096)             | Optional (as `maxOutputTokens`)     |
 | Thinking blocks              | Not exposed (o-series internal)  | `thinking` / `redacted_thinking` blocks| `thought` parts (2.5 models)       |
 | Structured output            | Native json_schema mode          | Prompt engineering or tool extraction  | Native responseSchema               |
 | Streaming protocol           | SSE with `data:` lines           | SSE with event type + data lines       | SSE (with `?alt=sse`) or JSON       |
-| Stream termination           | `data: [DONE]`                   | `message_stop` event                   | Final chunk (no explicit signal)    |
+| Stream termination           | `response.completed` event       | `message_stop` event                   | Final chunk (no explicit signal)    |
 | Finish reason for tools      | `tool_calls`                     | `tool_use`                             | No dedicated reason (infer from parts)|
 | Image input                  | Data URI in `image_url`          | `base64` source with `media_type`      | `inlineData` with `mimeType`        |
 | Prompt caching               | Automatic (free, 50% discount)   | Requires explicit `cache_control` blocks (90% discount) | Automatic (free prefix caching)   |
 | Beta/feature headers         | N/A (features in request body)   | `anthropic-beta` header (comma-separated) | N/A (features in request body)   |
-| Authentication               | Bearer token in Authorization    | `x-api-key` header                     | `key` query parameter               |
+| Authentication               | Bearer token in Authorization    | `x-api-key` header                     | `?key=` query parameter or `x-goog-api-key` header |
 | API versioning               | Via URL path (/v1/)              | `anthropic-version` header             | Via URL path (/v1beta/)             |
 
 ### 7.9 Adding a New Provider
