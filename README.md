@@ -18,6 +18,14 @@ Supply the following prompt to a modern coding agent (Claude Code, Codex, OpenCo
 codeagent> Implement Attractor as described by https://github.com/strongdm/attractor
 ```
 
+## Implementations
+
+Community implementations of the NLSpecs:
+
+| Spec | Language | Repo | Status |
+|------|----------|------|--------|
+| Unified LLM Client | Rust | [bkrabach/unified-llm-client-rust](https://github.com/bkrabach/unified-llm-client-rust) | 141/141 DoD, 925 tests, live API verified |
+
 ## Terminology
 
 - **NLSpec** (Natural Language Spec): a human-readable spec intended to be  directly usable by coding agents to implement/validate behavior.
