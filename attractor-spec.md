@@ -1619,7 +1619,7 @@ The engine emits typed events during execution for UI, logging, and metrics inte
 - `StageStarted(name, index)` -- stage begins
 - `StageCompleted(name, index, duration)` -- stage succeeded
 - `StageFailed(name, index, error, will_retry)` -- stage failed
-- `StageRetrying(name, index, attempt, delay)` -- stage retrying
+- `StageRetrying(name, index, attempt, delay, error)` -- stage retrying
 
 **Parallel execution events:**
 - `ParallelStarted(branch_count)` -- parallel block started
