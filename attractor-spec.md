@@ -96,13 +96,14 @@ Attr            ::= Key '=' Value
 Key             ::= Identifier | QualifiedId
 QualifiedId     ::= Identifier ( '.' Identifier )+
 
-Value           ::= String | Integer | Float | Boolean | Duration
+Value           ::= String | Integer | Float | Boolean | Duration | BareValue
 Identifier      ::= [A-Za-z_][A-Za-z0-9_]*
 String          ::= '"' ( '\\"' | '\\n' | '\\t' | '\\\\' | [^"\\] )* '"'
 Integer         ::= '-'? [0-9]+
 Float           ::= '-'? [0-9]* '.' [0-9]+
 Boolean         ::= 'true' | 'false'
 Duration        ::= Integer ( 'ms' | 's' | 'm' | 'h' | 'd' )
+BareValue       ::= [A-Za-z_][A-Za-z0-9_.:-]*
 
 Direction       ::= 'TB' | 'LR' | 'BT' | 'RL'
 ```
@@ -135,10 +136,10 @@ Graph attributes are declared in a `graph [ ... ]` block or as top-level `key = 
 | `goal`                    | String   | `""`      | Human-readable goal for the pipeline. Exposed as `$goal` in prompt templates and mirrored into the run context as `graph.goal`. |
 | `label`                   | String   | `""`      | Display name for the graph (used in visualization). |
 | `model_stylesheet`        | String   | `""`      | CSS-like stylesheet for per-node LLM model/provider defaults. See Section 8. |
-| `default_max_retry`       | Integer  | `50`      | Global retry ceiling for nodes that omit `max_retries`. |
+| `default_max_retries`     | Integer  | `0`       | Default additional retries for nodes that omit `max_retries`. Legacy alias: `default_max_retry`. |
 | `retry_target`            | String   | `""`      | Node ID to jump to if exit is reached with unsatisfied goal gates. |
 | `fallback_retry_target`   | String   | `""`      | Secondary jump target if `retry_target` is missing or invalid. |
-| `default_fidelity`        | String   | `""`      | Default context fidelity mode (see Section 5.4). |
+| `default_fidelity`        | String   | `""`      | Default context fidelity mode when explicitly set. Empty string means "unset"; the runtime fallback is `compact` (see Section 5.4). |
 
 ### 2.6 Node Attributes
 
@@ -148,8 +149,8 @@ Graph attributes are declared in a `graph [ ... ]` block or as top-level `key = 
 | `shape`             | String   | `"box"`         | Graphviz shape. Determines the default handler type (see mapping table below). |
 | `type`              | String   | `""`            | Explicit handler type override. Takes precedence over shape-based resolution. |
 | `prompt`            | String   | `""`            | Primary instruction for the stage. Supports `$goal` variable expansion. Falls back to `label` if empty for LLM stages. |
-| `max_retries`       | Integer  | `0`             | Number of additional attempts beyond the initial execution. `max_retries=3` means up to 4 total executions. |
-| `goal_gate`         | Boolean  | `false`         | If `true`, this node must reach SUCCESS before the pipeline can exit. |
+| `max_retries`       | Integer  | inherited       | Number of additional attempts beyond the initial execution. If omitted, inherits graph `default_max_retries`. `max_retries=3` means up to 4 total executions. |
+| `goal_gate`         | Boolean  | `false`         | If `true`, this node must reach `SUCCESS` or `PARTIAL_SUCCESS` before the pipeline can exit. |
 | `retry_target`      | String   | `""`            | Node ID to jump to if this node fails and retries are exhausted. |
 | `fallback_retry_target` | String | `""`          | Secondary retry target. |
 | `fidelity`          | String   | inherited       | Context fidelity mode for this node's LLM session. See Section 5.4. |
@@ -161,6 +162,8 @@ Graph attributes are declared in a `graph [ ... ]` block or as top-level `key = 
 | `reasoning_effort`  | String   | `"high"`        | LLM reasoning effort: `low`, `medium`, `high`. |
 | `auto_status`       | Boolean  | `false`         | If `true` and the handler writes no status, the engine auto-generates a SUCCESS outcome. |
 | `allow_partial`     | Boolean  | `false`         | Accept PARTIAL_SUCCESS when retries are exhausted instead of failing. |
+
+The external DOT attribute name is `type`. Implementations may use an internal field name such as `node_type` to avoid reserved-word conflicts, but the externally visible behavior must remain identical.
 
 ### 2.7 Edge Attributes
 
@@ -180,7 +183,7 @@ The `shape` attribute on a node determines which handler executes it, unless ove
 | Shape             | Handler Type          | Description |
 |-------------------|-----------------------|-------------|
 | `Mdiamond`        | `start`               | Pipeline entry point. No-op handler. Every graph must have exactly one. |
-| `Msquare`         | `exit`                | Pipeline exit point. No-op handler. Every graph must have exactly one. |
+| `Msquare`         | `exit`                | Pipeline exit point. No-op handler. Goal gate enforcement is handled by the execution engine (Section 3.4). Every graph must have exactly one. |
 | `box`             | `codergen`            | LLM task (code generation, analysis, planning). The default for all nodes without an explicit shape. |
 | `hexagon`         | `wait.human`          | Human-in-the-loop gate. Blocks until a human selects an option. |
 | `diamond`         | `conditional`         | Conditional routing point. Routes based on edge conditions against current context. |
@@ -316,17 +319,18 @@ digraph Review {
 
 ### 3.1 Run Lifecycle
 
-The execution lifecycle proceeds through five phases:
+The execution lifecycle proceeds through six phases:
 
 ```
-PARSE -> VALIDATE -> INITIALIZE -> EXECUTE -> FINALIZE
+PARSE -> TRANSFORM -> VALIDATE -> INITIALIZE -> EXECUTE -> FINALIZE
 ```
 
 1. **Parse:** Read the `.dot` source and produce an in-memory Graph model (nodes, edges, attributes).
-2. **Validate:** Run lint rules (Section 7). Reject invalid graphs. Warn on suspicious patterns.
-3. **Initialize:** Create the run directory, initial context, and checkpoint. Mirror graph attributes into the context. Apply transforms (stylesheet, variable expansion).
-4. **Execute:** Traverse the graph from the start node, executing handlers and selecting edges.
-5. **Finalize:** Write the final checkpoint, emit completion events, and clean up resources (close sessions, release files).
+2. **Transform:** Apply parse-time transforms (stylesheet, variable expansion, and custom AST transforms).
+3. **Validate:** Run lint rules (Section 7). Reject invalid graphs. Warn on suspicious patterns.
+4. **Initialize:** Create the run directory, initial context, and checkpoint. Mirror graph attributes into the context.
+5. **Execute:** Traverse the graph from the start node, executing handlers and selecting edges.
+6. **Finalize:** Write the final checkpoint, emit completion events, and clean up resources (close sessions, release files).
 
 ### 3.2 Core Execution Loop
 
@@ -356,8 +360,11 @@ FUNCTION run(graph, config):
                     current_node = graph.nodes[retry_target]
                     CONTINUE
                 ELSE:
-                    RAISE "Goal gate unsatisfied and no retry target"
-            BREAK  -- Exit the loop; pipeline complete
+                    RETURN Outcome(
+                        status=FAIL,
+                        failure_reason="Goal gate unsatisfied and no retry target"
+                    )
+            RETURN Outcome(status=SUCCESS, notes="Pipeline completed")
 
         -- Step 2: Execute node handler with retry policy
         retry_policy = build_retry_policy(node, graph)
@@ -382,8 +389,8 @@ FUNCTION run(graph, config):
         next_edge = select_edge(node, outcome, context, graph)
         IF next_edge is NONE:
             IF outcome.status == FAIL:
-                RAISE "Stage failed with no outgoing fail edge"
-            BREAK
+                RETURN outcome
+            RETURN Outcome(status=SUCCESS, notes="Pipeline completed")
 
         -- Step 7: Handle loop_restart
         IF next_edge has loop_restart=true:
@@ -393,7 +400,7 @@ FUNCTION run(graph, config):
         -- Step 8: Advance to next node
         current_node = graph.nodes[next_edge.to_node]
 
-    RETURN last_outcome
+    RETURN Outcome(status=SUCCESS, notes="Pipeline completed")
 ```
 
 ### 3.3 Edge Selection Algorithm
@@ -402,9 +409,9 @@ After a node completes, the engine selects the next edge from the node's outgoin
 
 **Step 1: Condition-matching edges.** Evaluate each edge's `condition` expression (see Section 10) against the current context and outcome. Edges whose condition evaluates to `true` are eligible. Edges with no condition are not considered in this step; they proceed to later steps.
 
-**Step 2: Preferred label match.** If the node's outcome includes a `preferred_label`, find the first eligible edge (condition-passing or unconditional) whose `label` matches after normalization. Label normalization: lowercase, trim whitespace, strip accelerator prefixes (patterns like `[Y] `, `Y) `, `Y - `).
+**Step 2: Preferred label match.** If no condition-matching edges were found and the node's outcome includes a `preferred_label`, find the first unconditional edge whose `label` matches after normalization. Label normalization: lowercase, trim whitespace, strip accelerator prefixes (patterns like `[Y] `, `Y) `, `Y - `).
 
-**Step 3: Suggested next IDs.** If no label match and the outcome includes `suggested_next_ids`, find the first eligible edge whose target node ID appears in the list.
+**Step 3: Suggested next IDs.** If no label match and the outcome includes `suggested_next_ids`, find the first unconditional edge whose target node ID appears in the list.
 
 **Step 4: Highest weight.** Among remaining eligible unconditional edges, choose the one with the highest `weight` attribute (default 0).
 
@@ -428,14 +435,14 @@ FUNCTION select_edge(node, outcome, context, graph):
     -- Step 2: Preferred label
     IF outcome.preferred_label is not empty:
         FOR EACH edge IN edges:
-            IF normalize_label(edge.label) == normalize_label(outcome.preferred_label):
+            IF edge.condition is empty AND normalize_label(edge.label) == normalize_label(outcome.preferred_label):
                 RETURN edge
 
     -- Step 3: Suggested next IDs
     IF outcome.suggested_next_ids is not empty:
         FOR EACH suggested_id IN outcome.suggested_next_ids:
             FOR EACH edge IN edges:
-                IF edge.to_node == suggested_id:
+                IF edge.condition is empty AND edge.to_node == suggested_id:
                     RETURN edge
 
     -- Step 4 & 5: Weight with lexical tiebreak (unconditional edges only)
@@ -443,8 +450,7 @@ FUNCTION select_edge(node, outcome, context, graph):
     IF unconditional is not empty:
         RETURN best_by_weight_then_lexical(unconditional)
 
-    -- Fallback: any edge
-    RETURN best_by_weight_then_lexical(edges)
+    RETURN NONE
 
 
 FUNCTION best_by_weight_then_lexical(edges):
@@ -459,7 +465,7 @@ Nodes with `goal_gate=true` represent critical stages that must succeed before t
 1. Check all visited nodes that have `goal_gate=true`.
 2. If any goal gate node has a non-success outcome (not SUCCESS or PARTIAL_SUCCESS), the pipeline cannot exit.
 3. Instead, jump to the `retry_target` of the unsatisfied goal gate node. If that is not set, try `fallback_retry_target`. If that is also not set, try the graph-level `retry_target` and `fallback_retry_target`.
-4. If no retry target exists at any level, the pipeline fails with an error.
+4. If no retry target exists at any level, the pipeline ends with a FAIL outcome.
 
 ```
 FUNCTION check_goal_gates(graph, node_outcomes):
@@ -475,9 +481,10 @@ FUNCTION check_goal_gates(graph, node_outcomes):
 
 Each node has a retry policy determined by:
 
-1. Node attribute `max_retries` (if set) -- number of additional attempts beyond the initial execution
-2. Graph attribute `default_max_retry` (fallback)
-3. Built-in default: 0 (no retries)
+1. Node attribute `max_retries` (if explicitly set) -- number of additional attempts beyond the initial execution
+2. Graph attribute `default_max_retries` (fallback; legacy alias `default_max_retry` is accepted)
+
+If neither is set, the built-in default is 0 (no retries).
 
 The `max_retries` attribute specifies additional attempts. So `max_retries=3` means a total of 4 executions (1 initial + 3 retries). Internally this maps to `max_attempts = max_retries + 1`.
 
@@ -632,7 +639,7 @@ StartHandler:
         RETURN Outcome(status=SUCCESS)
 ```
 
-Every graph must have exactly one start node (shape=Mdiamond). The lint rules enforce this.
+Every graph must have exactly one start node (shape=Mdiamond or id matching `start`/`Start`). The lint rules enforce this.
 
 ### 4.4 Exit Handler
 
@@ -644,7 +651,7 @@ ExitHandler:
         RETURN Outcome(status=SUCCESS)
 ```
 
-Every graph must have exactly one exit node (shape=Msquare).
+Every graph must have exactly one exit node (shape=Msquare or id matching `exit`/`end`).
 
 ### 4.5 Codergen Handler (LLM Task)
 
@@ -805,7 +812,6 @@ ParallelHandler:
 
         -- 2. Determine join policy from node attributes
         join_policy = node.attrs.get("join_policy", "wait_all")
-        error_policy = node.attrs.get("error_policy", "continue")
         max_parallel = integer(node.attrs.get("max_parallel", "4"))
 
         -- 3. Execute branches concurrently with bounded parallelism
@@ -815,7 +821,10 @@ ParallelHandler:
             branch_outcome = execute_subgraph(branch.to_node, branch_context, graph, logs_root)
             results.append(branch_outcome)
 
-        -- 4. Evaluate join policy
+        -- 4. Store results in context for downstream fan-in
+        context.set("parallel.results", serialize_results(results))
+
+        -- 5. Evaluate join policy
         success_count = count(r FOR r IN results WHERE r.status == SUCCESS)
         fail_count = count(r FOR r IN results WHERE r.status == FAIL)
 
@@ -831,8 +840,6 @@ ParallelHandler:
             ELSE:
                 RETURN Outcome(status=FAIL)
 
-        -- 5. Store results in context for downstream fan-in
-        context.set("parallel.results", serialize_results(results))
         RETURN Outcome(status=SUCCESS)
 ```
 
@@ -841,17 +848,7 @@ ParallelHandler:
 | Policy           | Behavior |
 |------------------|----------|
 | `wait_all`       | All branches must complete. Join satisfied when all are done. |
-| `k_of_n`         | At least K branches must succeed. |
 | `first_success`  | Join satisfied as soon as one branch succeeds. Others may be cancelled. |
-| `quorum`         | At least a configurable fraction of branches must succeed. |
-
-**Error policies:**
-
-| Policy              | Behavior |
-|---------------------|----------|
-| `fail_fast`         | Cancel all remaining branches on first failure. |
-| `continue`          | Continue remaining branches. Collect all results. |
-| `ignore`            | Ignore failures entirely. Return only successful results. |
 
 ### 4.9 Fan-In Handler
 
@@ -1025,9 +1022,9 @@ Context:
         RELEASE write lock
 
     FUNCTION snapshot() -> Map<String, Any>:
-        -- Returns a serializable copy of all values
+        -- Returns a serializable deep copy of all values
         ACQUIRE read lock
-        result = shallow_copy(values)
+        result = deep_copy(values)
         RELEASE read lock
         RETURN result
 
@@ -1035,7 +1032,7 @@ Context:
         -- Deep copy for parallel branch isolation
         ACQUIRE read lock
         new_context = new Context()
-        new_context.values = shallow_copy(values)
+        new_context.values = deep_copy(values)
         new_context.logs = copy(logs)
         RELEASE read lock
         RETURN new_context
@@ -1163,7 +1160,7 @@ FidelityMode ::= 'full'
 1. Edge `fidelity` attribute (on the incoming edge)
 2. Target node `fidelity` attribute
 3. Graph `default_fidelity` attribute
-4. Default: `compact`
+4. Default when unset: `compact`
 
 **Thread resolution (for `full` fidelity):**
 
@@ -1397,7 +1394,7 @@ Severity:
 | Rule ID                  | Severity | Description |
 |--------------------------|----------|-------------|
 | `start_node`             | ERROR    | Pipeline must have exactly one start node (shape=Mdiamond or id matching `start`/`Start`). |
-| `terminal_node`          | ERROR    | Pipeline must have at least one terminal node (shape=Msquare or id matching `exit`/`end`). |
+| `terminal_node`          | ERROR    | Pipeline must have exactly one terminal node (shape=Msquare or id matching `exit`/`end`). |
 | `reachability`           | ERROR    | All nodes must be reachable from the start node via BFS/DFS traversal. |
 | `edge_target_exists`     | ERROR    | Every edge target must reference an existing node ID. |
 | `start_no_incoming`      | ERROR    | The start node must have no incoming edges. |
@@ -1456,11 +1453,12 @@ The `model_stylesheet` graph attribute provides CSS-like rules for setting defau
 ```
 Stylesheet    ::= Rule+
 Rule          ::= Selector '{' Declaration ( ';' Declaration )* ';'? '}'
-Selector      ::= '*' | '#' Identifier | '.' ClassName
+Selector      ::= '*' | ShapeName | '#' Identifier | '.' ClassName
 ClassName     ::= [a-z0-9-]+
+ShapeName     ::= Identifier
 Declaration   ::= Property ':' PropertyValue
 Property      ::= 'llm_model' | 'llm_provider' | 'reasoning_effort'
-PropertyValue ::= String | 'low' | 'medium' | 'high'
+PropertyValue ::= String | BareValue
 ```
 
 ### 8.3 Selectors and Specificity
@@ -1468,8 +1466,9 @@ PropertyValue ::= String | 'low' | 'medium' | 'high'
 | Selector      | Matches                      | Specificity |
 |---------------|------------------------------|-------------|
 | `*`           | All nodes                    | 0 (lowest)  |
-| `.class_name` | Nodes with that class        | 1 (medium)  |
-| `#node_id`    | Specific node by ID          | 2 (highest) |
+| `box`         | Nodes with that shape        | 1           |
+| `.class_name` | Nodes with that class        | 2           |
+| `#node_id`    | Specific node by ID          | 3 (highest) |
 
 Later rules of equal specificity override earlier ones. Explicit node attributes always override stylesheet values (highest precedence).
 
@@ -1486,7 +1485,7 @@ Later rules of equal specificity override earlier ones. Explicit node attributes
 The resolution order for any model-related property on a node is:
 
 1. Explicit node attribute (e.g., `llm_model="gpt-5.2"` on the node) -- highest precedence
-2. Stylesheet rule matching by specificity (ID > class > universal)
+2. Stylesheet rule matching by specificity (ID > class > shape > universal)
 3. Graph-level default attribute
 4. Handler/system default
 
@@ -1655,7 +1654,7 @@ Graph-level or node-level attributes `tool_hooks.pre` and `tool_hooks.post` spec
 - **Pre-hook:** Executed before every LLM tool call. Receives tool metadata via environment variables and stdin JSON. Exit code 0 means proceed; non-zero means skip the tool call.
 - **Post-hook:** Executed after every LLM tool call. Receives tool metadata and result. Primarily for logging and auditing.
 
-Hook failures (non-zero exit) do not block the tool call but are recorded in the stage log.
+Pre-hook failures (non-zero exit) skip the tool call and are recorded in the stage log. Post-hook failures do not block the tool call but are recorded.
 
 ---
 
@@ -1675,7 +1674,8 @@ Key            ::= 'outcome'
                  | 'context.' Path
 Path           ::= Identifier ( '.' Identifier )*
 Operator       ::= '=' | '!='
-Literal        ::= String | Integer | Boolean
+Literal        ::= String | Integer | Boolean | BareLiteral
+BareLiteral    ::= [A-Za-z_][A-Za-z0-9_.:-]*
 ```
 
 ### 10.3 Semantics
@@ -1731,13 +1731,20 @@ FUNCTION evaluate_condition(condition, outcome, context) -> Boolean:
 FUNCTION evaluate_clause(clause, outcome, context) -> Boolean:
     IF clause contains "!=":
         (key, value) = split(clause, "!=", max=1)
-        RETURN resolve_key(trim(key), outcome, context) != trim(value)
+        RETURN resolve_key(trim(key), outcome, context) != parse_literal(value)
     ELSE IF clause contains "=":
         (key, value) = split(clause, "=", max=1)
-        RETURN resolve_key(trim(key), outcome, context) == trim(value)
+        RETURN resolve_key(trim(key), outcome, context) == parse_literal(value)
     ELSE:
         -- Bare key: check if truthy
         RETURN bool(resolve_key(trim(clause), outcome, context))
+
+
+FUNCTION parse_literal(value) -> String:
+    value = trim(value)
+    IF value starts with '"' AND value ends with '"':
+        RETURN unescape_string(value[1..-2])
+    RETURN value
 ```
 
 ### 10.6 Examples
@@ -1792,8 +1799,8 @@ This section defines how to validate that an implementation of this spec is comp
 
 ### 11.2 Validation and Linting
 
-- [ ] Exactly one start node (shape=Mdiamond) is required
-- [ ] Exactly one exit node (shape=Msquare) is required
+- [ ] Exactly one start node (shape=Mdiamond or id matching `start`/`Start`) is required
+- [ ] Exactly one exit node (shape=Msquare or id matching `exit`/`end`) is required
 - [ ] Start node has no incoming edges
 - [ ] Exit node has no outgoing edges
 - [ ] All nodes are reachable from start (no orphans)
@@ -1812,12 +1819,12 @@ This section defines how to validate that an implementation of this spec is comp
 - [ ] Edge selection follows the 5-step priority: condition match -> preferred label -> suggested IDs -> weight -> lexical
 - [ ] Engine loops: execute node -> select edge -> advance to next node -> repeat
 - [ ] Terminal node (shape=Msquare) stops execution
-- [ ] Pipeline outcome is "success" if all goal_gate nodes succeeded, "fail" otherwise
+- [ ] Pipeline outcome is "success" if all goal_gate nodes reached `SUCCESS` or `PARTIAL_SUCCESS`, "fail" otherwise
 
 ### 11.4 Goal Gate Enforcement
 
 - [ ] Nodes with `goal_gate=true` are tracked throughout execution
-- [ ] Before allowing exit via a terminal node, the engine checks all goal gate nodes have status SUCCESS
+- [ ] Before allowing exit via a terminal node, the engine checks all goal gate nodes have status `SUCCESS` or `PARTIAL_SUCCESS`
 - [ ] If any goal gate node has not succeeded, the engine routes to `retry_target` (if configured) instead of exiting
 - [ ] If no retry_target and goal gates unsatisfied, pipeline outcome is "fail"
 
@@ -1853,7 +1860,7 @@ This section defines how to validate that an implementation of this spec is comp
 ### 11.8 Human-in-the-Loop
 
 - [ ] Interviewer interface works: `ask(question) -> Answer`
-- [ ] Question supports types: SINGLE_SELECT, MULTI_SELECT, FREE_TEXT, CONFIRM
+- [ ] Question supports types: YES_NO, MULTIPLE_CHOICE, FREEFORM, CONFIRMATION
 - [ ] AutoApproveInterviewer always selects the first option (for automation/testing)
 - [ ] ConsoleInterviewer prompts in terminal and reads user input
 - [ ] CallbackInterviewer delegates to a provided function
@@ -1872,9 +1879,9 @@ This section defines how to validate that an implementation of this spec is comp
 ### 11.10 Model Stylesheet
 
 - [ ] Stylesheet is parsed from the graph's `model_stylesheet` attribute
-- [ ] Selectors by shape name work (e.g., `box { model = "claude-opus-4-6" }`)
-- [ ] Selectors by class name work (e.g., `.fast { model = "gemini-3-flash-preview" }`)
-- [ ] Selectors by node ID work (e.g., `#review { reasoning_effort = "high" }`)
+- [ ] Selectors by shape name work (e.g., `box { llm_model: "claude-opus-4-6" }`)
+- [ ] Selectors by class name work (e.g., `.fast { llm_model: "gemini-3-flash-preview" }`)
+- [ ] Selectors by node ID work (e.g., `#review { reasoning_effort: "high" }`)
 - [ ] Specificity order: universal < shape < class < ID
 - [ ] Stylesheet properties are overridden by explicit node attributes
 
@@ -1983,8 +1990,8 @@ ASSERT "review" IN checkpoint.completed_nodes
 | `goal`                  | String   | `""`    | Pipeline-level goal description |
 | `label`                 | String   | `""`    | Display name for the graph |
 | `model_stylesheet`      | String   | `""`    | CSS-like LLM model/provider stylesheet |
-| `default_max_retry`     | Integer  | `50`    | Global retry ceiling |
-| `default_fidelity`      | String   | `""`    | Default context fidelity mode |
+| `default_max_retries`   | Integer  | `0`     | Default additional retries for nodes that omit `max_retries`. Legacy alias: `default_max_retry`. |
+| `default_fidelity`      | String   | `""`    | Default context fidelity mode when explicitly set. Empty string means unset; runtime fallback is `compact`. |
 | `retry_target`          | String   | `""`    | Node to jump to on unsatisfied exit |
 | `fallback_retry_target` | String   | `""`    | Secondary jump target |
 | `stack.child_dotfile`   | String   | `""`    | Path to child DOT file for supervision |
@@ -2000,8 +2007,8 @@ ASSERT "review" IN checkpoint.completed_nodes
 | `shape`                 | String   | `"box"`       | Graphviz shape (determines handler type) |
 | `type`                  | String   | `""`          | Explicit handler type override |
 | `prompt`                | String   | `""`          | LLM prompt (supports `$goal` expansion) |
-| `max_retries`           | Integer  | `0`           | Additional retry attempts |
-| `goal_gate`             | Boolean  | `false`       | Must succeed before pipeline exit |
+| `max_retries`           | Integer  | inherited     | Additional retry attempts. If omitted, inherits graph `default_max_retries`. |
+| `goal_gate`             | Boolean  | `false`       | Must reach `SUCCESS` or `PARTIAL_SUCCESS` before pipeline exit |
 | `retry_target`          | String   | `""`          | Jump target on failure |
 | `fallback_retry_target` | String   | `""`          | Secondary jump target |
 | `fidelity`              | String   | inherited     | Context fidelity mode |
@@ -2050,7 +2057,7 @@ Each non-terminal node writes a `status.json` file in its stage directory. This 
 ```
 {
     "outcome": "success | retry | fail | partial_success",
-    "preferred_next_label": "<edge label or empty>",
+    "preferred_label": "<edge label or empty>",
     "suggested_next_ids": ["<node_id>", ...],
     "context_updates": {
         "key": "value",
@@ -2063,7 +2070,7 @@ Each non-terminal node writes a `status.json` file in its stage directory. This 
 | Field                  | Type            | Required | Description |
 |------------------------|-----------------|----------|-------------|
 | `outcome`              | String (enum)   | Yes      | Outcome status. Drives routing and goal checks. |
-| `preferred_next_label` | String          | No       | Edge label to prioritize for next transition. |
+| `preferred_label`      | String          | No       | Edge label to prioritize for next transition. |
 | `suggested_next_ids`   | List of Strings | No       | Fallback target node IDs if no label match. |
 | `context_updates`      | Map             | No       | Key-value pairs merged into the run context. |
 | `notes`                | String          | No       | Human-readable log entries. |
