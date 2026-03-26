@@ -1904,7 +1904,7 @@ Run this validation matrix -- each cell must pass:
 | Parse multi-line node attributes                 | [ ] |
 | Validate: missing start node -> error            | [ ] |
 | Validate: missing exit node -> error             | [ ] |
-| Validate: orphan node -> warning                 | [ ] |
+| Validate: orphan node -> error                   | [ ] |
 | Execute a linear 3-node pipeline end-to-end      | [ ] |
 | Execute with conditional branching (success/fail paths) | [ ] |
 | Execute with retry on failure (max_retries=2)    | [ ] |
