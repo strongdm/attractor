@@ -337,16 +337,18 @@ PARSE -> TRANSFORM -> VALIDATE -> INITIALIZE -> EXECUTE -> FINALIZE
 The following pseudocode defines the execution engine's traversal algorithm. This is the heart of the system.
 
 ```
-FUNCTION run(graph, config):
-    context = new Context()
+FUNCTION run(graph, context=new Context(), start_at=None):
     mirror_graph_attributes(graph, context)
     checkpoint = new Checkpoint()
     completed_nodes = []
     node_outcomes = {}
-
-    current_node = find_start_node(graph)
-        -- Resolves by: (1) shape=Mdiamond, (2) id="start" or "Start"
-        -- Raises error if not found
+    
+    IF start_at is not NONE:
+        current_node = graph.nodes[start_at]
+    ELSE:
+        current_node = find_start_node(graph)
+            -- Resolves by: (1) shape=Mdiamond, (2) id="start" or "Start"
+            -- Raises error if not found
 
     WHILE true:
         node = graph.nodes[current_node.id]
@@ -394,8 +396,7 @@ FUNCTION run(graph, config):
 
         -- Step 7: Handle loop_restart
         IF next_edge has loop_restart=true:
-            restart_run(graph, config, start_at=next_edge.target)
-            RETURN
+            RETURN run(graph, context, start_at=next_edge.target)
 
         -- Step 8: Advance to next node
         current_node = graph.nodes[next_edge.to_node]
@@ -1958,8 +1959,7 @@ lint_results = validate(graph)
 ASSERT no error-severity results in lint_results
 
 -- 3. Execute with LLM callback
-context = Context()
-outcome = run_pipeline(graph, context, llm_callback = real_llm_callback)
+outcome = run(graph)
 
 -- 4. Verify
 ASSERT outcome.status == "success"
