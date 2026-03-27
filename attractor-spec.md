@@ -337,7 +337,7 @@ PARSE -> TRANSFORM -> VALIDATE -> INITIALIZE -> EXECUTE -> FINALIZE
 The following pseudocode defines the execution engine's traversal algorithm. This is the heart of the system.
 
 ```
-FUNCTION run(graph, context=new Context(), start_at=None):
+FUNCTION run(graph, context, start_at=None):
     mirror_graph_attributes(graph, context)
     checkpoint = new Checkpoint()
     completed_nodes = []
@@ -396,6 +396,7 @@ FUNCTION run(graph, context=new Context(), start_at=None):
 
         -- Step 7: Handle loop_restart
         IF next_edge has loop_restart=true:
+            context = new Context()
             RETURN run(graph, context, start_at=next_edge.to_node)
 
         -- Step 8: Advance to next node
@@ -1959,7 +1960,8 @@ lint_results = validate(graph)
 ASSERT no error-severity results in lint_results
 
 -- 3. Execute with LLM callback
-outcome = run(graph)
+context = new Context()
+outcome = run(graph, context)
 
 -- 4. Verify
 ASSERT outcome.status == SUCCESS
