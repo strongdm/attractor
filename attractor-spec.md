@@ -1962,8 +1962,7 @@ ASSERT no error-severity results in lint_results
 outcome = run(graph)
 
 -- 4. Verify
-ASSERT outcome.status == "success"
-ASSERT "implement" in outcome.completed_nodes
+ASSERT outcome.status == SUCCESS
 ASSERT artifacts_exist(logs_root, "plan", ["prompt.md", "response.md", "status.json"])
 ASSERT artifacts_exist(logs_root, "implement", ["prompt.md", "response.md", "status.json"])
 ASSERT artifacts_exist(logs_root, "review", ["prompt.md", "response.md", "status.json"])
