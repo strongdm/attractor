@@ -1832,7 +1832,7 @@ This section defines how to validate that an implementation of this spec is comp
 
 ### 11.5 Retry Logic
 
-- [ ] Nodes with `max_retries > 0` are retried on RETRY or FAIL outcomes
+- [ ] Nodes with `max_retries > 0` are retried on RETRY outcomes
 - [ ] Retry count is tracked per-node and respects the configured limit
 - [ ] Backoff between retries works (constant, linear, or exponential as configured)
 - [ ] Jitter is applied to backoff delays when configured
