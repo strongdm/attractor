@@ -337,16 +337,18 @@ PARSE -> TRANSFORM -> VALIDATE -> INITIALIZE -> EXECUTE -> FINALIZE
 The following pseudocode defines the execution engine's traversal algorithm. This is the heart of the system.
 
 ```
-FUNCTION run(graph, config):
-    context = new Context()
+FUNCTION run(graph, context, start_at=None):
     mirror_graph_attributes(graph, context)
     checkpoint = new Checkpoint()
     completed_nodes = []
     node_outcomes = {}
-
-    current_node = find_start_node(graph)
-        -- Resolves by: (1) shape=Mdiamond, (2) id="start" or "Start"
-        -- Raises error if not found
+    
+    IF start_at is not NONE:
+        current_node = graph.nodes[start_at]
+    ELSE:
+        current_node = find_start_node(graph)
+            -- Resolves by: (1) shape=Mdiamond, (2) id="start" or "Start"
+            -- Raises error if not found
 
     WHILE true:
         node = graph.nodes[current_node.id]
@@ -394,8 +396,8 @@ FUNCTION run(graph, config):
 
         -- Step 7: Handle loop_restart
         IF next_edge has loop_restart=true:
-            restart_run(graph, config, start_at=next_edge.target)
-            RETURN
+            context = new Context()
+            RETURN run(graph, context, start_at=next_edge.to_node)
 
         -- Step 8: Advance to next node
         current_node = graph.nodes[next_edge.to_node]
@@ -768,6 +770,7 @@ WaitForHumanHandler:
         -- 6. Record in context and return
         RETURN Outcome(
             status=SUCCESS,
+            preferred_label=selected.label
             suggested_next_ids=[selected.to],
             context_updates={
                 "human.gate.selected": selected.key,
@@ -1830,7 +1833,7 @@ This section defines how to validate that an implementation of this spec is comp
 
 ### 11.5 Retry Logic
 
-- [ ] Nodes with `max_retries > 0` are retried on RETRY or FAIL outcomes
+- [ ] Nodes with `max_retries > 0` are retried on RETRY outcomes
 - [ ] Retry count is tracked per-node and respects the configured limit
 - [ ] Backoff between retries works (constant, linear, or exponential as configured)
 - [ ] Jitter is applied to backoff delays when configured
@@ -1888,7 +1891,7 @@ This section defines how to validate that an implementation of this spec is comp
 ### 11.11 Transforms and Extensibility
 
 - [ ] AST transforms can modify the Graph between parsing and validation
-- [ ] Transform interface: `transform(graph) -> graph`
+- [ ] Transform interface: `apply(graph) -> Graph`
 - [ ] Built-in variable expansion transform replaces `$goal` in prompts
 - [ ] Custom transforms can be registered and run in order
 - [ ] HTTP server mode (if implemented): POST /run starts pipeline, GET /status checks state, POST /answer submits human input
@@ -1904,7 +1907,7 @@ Run this validation matrix -- each cell must pass:
 | Parse multi-line node attributes                 | [ ] |
 | Validate: missing start node -> error            | [ ] |
 | Validate: missing exit node -> error             | [ ] |
-| Validate: orphan node -> warning                 | [ ] |
+| Validate: orphan node -> error                   | [ ] |
 | Execute a linear 3-node pipeline end-to-end      | [ ] |
 | Execute with conditional branching (success/fail paths) | [ ] |
 | Execute with retry on failure (max_retries=2)    | [ ] |
@@ -1958,12 +1961,11 @@ lint_results = validate(graph)
 ASSERT no error-severity results in lint_results
 
 -- 3. Execute with LLM callback
-context = Context()
-outcome = run_pipeline(graph, context, llm_callback = real_llm_callback)
+context = new Context()
+outcome = run(graph, context)
 
 -- 4. Verify
-ASSERT outcome.status == "success"
-ASSERT "implement" in outcome.completed_nodes
+ASSERT outcome.status == SUCCESS
 ASSERT artifacts_exist(logs_root, "plan", ["prompt.md", "response.md", "status.json"])
 ASSERT artifacts_exist(logs_root, "implement", ["prompt.md", "response.md", "status.json"])
 ASSERT artifacts_exist(logs_root, "review", ["prompt.md", "response.md", "status.json"])
