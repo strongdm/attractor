@@ -140,6 +140,7 @@ Graph attributes are declared in a `graph [ ... ]` block or as top-level `key = 
 | `retry_target`            | String   | `""`      | Node ID to jump to if exit is reached with unsatisfied goal gates. |
 | `fallback_retry_target`   | String   | `""`      | Secondary jump target if `retry_target` is missing or invalid. |
 | `default_fidelity`        | String   | `""`      | Default context fidelity mode when explicitly set. Empty string means "unset"; the runtime fallback is `compact` (see Section 5.4). |
+| `working_directory`       | String   | `"."`     | Working directory for all tool execution in this pipeline. Passed to the `ExecutionEnvironment` and used as the base for relative paths in file operations, shell commands, and search tools. Can be overridden per-run at invocation time. |
 
 ### 2.6 Node Attributes
 
@@ -191,6 +192,8 @@ The `shape` attribute on a node determines which handler executes it, unless ove
 | `tripleoctagon`   | `parallel.fan_in`     | Parallel fan-in. Waits for all branches and consolidates results. |
 | `parallelogram`   | `tool`                | External tool execution (shell command, API call). |
 | `house`           | `stack.manager_loop`  | Supervisor loop. Orchestrates observe/steer/wait cycles over a child pipeline. |
+
+**Rendering note:** `Mdiamond` and `Msquare` are Graphviz shapes that render as double-bordered diamonds and double-bordered squares respectively. Some rendering environments (particularly browser-based Graphviz WASM implementations) produce visual artifacts with these shapes. Implementations that render DOT for visualization may substitute visually cleaner shapes (e.g., `diamond` for `Mdiamond`, `octagon` for `Msquare`) in the rendering layer, while preserving the original shapes in the handler registry for node type resolution.
 
 ### 2.9 Chained Edges
 
@@ -575,6 +578,15 @@ When a stage returns FAIL (or retries are exhausted), the engine attempts failur
 The graph traversal is single-threaded. Only one node executes at a time in the top-level graph. This simplifies reasoning about context state and avoids race conditions.
 
 Parallelism exists within specific node handlers (`parallel`, `parallel.fan_in`) that manage concurrent execution internally. Each parallel branch receives an isolated clone of the context. Branch results are collected but individual branch context changes are not merged back into the parent -- only the handler's outcome and its `context_updates` are applied.
+
+### 3.9 Async Execution
+
+Pipeline runs may take minutes or hours to complete. In web-based implementations, synchronous execution will exceed HTTP request timeouts (typically 30-60 seconds). Implementations should support asynchronous execution:
+
+- **Job queue dispatch:** The `run()` function should be callable from a background job/worker. The pipeline's run record (status, node outcomes, checkpoint) is persisted to a database, allowing the web layer to poll or subscribe for updates.
+- **Progress reporting:** Use the event system (Section 9.6) with SSE, WebSocket, or polling to stream pipeline progress to the UI.
+- **Timeouts:** Background jobs should enforce their own timeout (recommended: 10 minutes minimum for multi-node pipelines with LLM calls), independent of HTTP timeouts.
+- **Failure recording:** If the background job fails, the error must be persisted to the run record so the UI can display it. An unhandled exception in a fire-and-forget job is invisible to the user.
 
 ---
 
@@ -1646,6 +1658,10 @@ runner.on_event = FUNCTION(event):
 FOR EACH event IN pipeline.events():
     process(event)
 ```
+
+**Token aggregation across providers:** When a pipeline uses different LLM providers per node (via the model stylesheet or per-node `llm_provider`/`llm_model` attributes), token usage must be tracked per-provider in addition to any aggregate total. Token counts from different providers are not directly comparable (tokenizers differ), and cost estimation requires provider-specific rate tables. Implementations should emit per-node `Usage` data in stage events and maintain per-provider subtotals in the run record.
+
+**Implementation note:** Event emission should be decoupled from handler logic. Node handlers should return data (outcomes, context updates), and the orchestration layer should emit events based on that data. This keeps handlers testable in isolation (unit tests typically lack a framework container for logging, event dispatch, etc.) and ensures observability is consistently applied regardless of which handler runs.
 
 ### 9.7 Tool Call Hooks
 

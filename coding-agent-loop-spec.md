@@ -776,6 +776,7 @@ The default. Runs everything on the local machine.
 **Command execution:**
 - Spawn in a new process group for clean killability
 - Use the platform's default shell (`/bin/bash -c` on Linux/macOS, `cmd.exe /c` on Windows)
+- Pass the command string directly to the shell interpreter -- do **not** apply shell escaping (e.g., `escapeshellcmd()` in PHP, `shlex.quote()` in Python) to the entire command. The LLM generates complete shell commands that rely on operators (`|`, `>`, `>>`, `&&`, `||`, `2>&1`, `$()`, etc.), and escaping them breaks intended functionality. Security should be enforced at the `ExecutionEnvironment` boundary (sandboxing, allowed command lists, resource limits) rather than by escaping shell metacharacters.
 - Enforce timeout: on timeout, send SIGTERM to the process group, wait 2 seconds, then SIGKILL
 - Capture stdout and stderr separately, then combine for the result
 - Record wall-clock duration
