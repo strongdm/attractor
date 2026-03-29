@@ -646,9 +646,18 @@ Provider finish reason mapping:
 | Gemini    | MAX_TOKENS        | length           |
 | Gemini    | SAFETY            | content_filter   |
 | Gemini    | RECITATION        | content_filter   |
+| Gemini    | BLOCKLIST         | content_filter   |
+| Gemini    | PROHIBITED_CONTENT| content_filter   |
+| Gemini    | SPII              | content_filter   |
+| Gemini    | MALFORMED_FUNCTION_CALL | content_filter |
+| Gemini    | LANGUAGE          | other            |
+| Gemini    | OTHER             | other            |
+| Gemini    | FINISH_REASON_UNSPECIFIED | other      |
 | Gemini    | (has tool calls)  | tool_calls       |
 
 Note: Gemini does not have a dedicated "tool_calls" finish reason. The adapter infers it from the presence of `functionCall` parts in the response.
+
+Gemini also defines several image-generation and advanced finish reasons (`IMAGE_SAFETY`, `IMAGE_PROHIBITED_CONTENT`, `IMAGE_RECITATION`, `IMAGE_OTHER`, `NO_IMAGE`, `UNEXPECTED_TOOL_CALL`, `TOO_MANY_TOOL_CALLS`, `MISSING_THOUGHT_SIGNATURE`, `MALFORMED_RESPONSE`, `MODEL_ARMOR`) that are not yet common in coding agent use cases. Implementations should map these to `content_filter` or `other` as appropriate, and include the raw provider reason in error messages to aid debugging.
 
 ### 3.9 Usage
 
@@ -1346,6 +1355,8 @@ Every error carries a `retryable` property.
 | QuotaExceededError     | (varies)    | false     |
 | ContentFilterError     | (varies)    | false     |
 | RequestTimeoutError    | 408         | false     |
+
+Note: `ContentFilterError` is raised when a response's `FinishReason` is `content_filter`. This is distinct from an HTTP error -- the request succeeds (200), but the response content is blocked or empty. Gemini returns this via multiple raw values (`SAFETY`, `BLOCKLIST`, `SPII`, `PROHIBITED_CONTENT`, `RECITATION`). Implementations must preserve the raw provider reason in the error message, as the specific filter category affects whether the caller should retry with a modified prompt or abort entirely.
 | ConfigurationError     | (N/A)       | false     |
 
 **Retryable errors** (transient -- may succeed on retry):
